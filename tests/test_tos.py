@@ -81,3 +81,20 @@ def test_rules_stay_quiet_on_fair_clauses():
     assert false_alarms / len(fair) < 0.35, (
         f"rules fired on {false_alarms}/{len(fair)} clauses experts marked fair"
     )
+
+
+def test_ui_role_map_covers_every_domain():
+    """Regression: adding CONSUMER_TOS to the Domain enum left the Streamlit
+    role map with two entries and three domains, which would have raised a
+    KeyError in front of a user. Adding a domain must not silently break the
+    interface."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from ui.app import ROLE_BY_DOMAIN
+
+    missing = [d.value for d in Domain if d not in ROLE_BY_DOMAIN]
+    assert not missing, f"the UI has no role options for: {missing}"
+    for domain, options in ROLE_BY_DOMAIN.items():
+        assert len(options) == 2, f"{domain} must offer both sides"

@@ -39,6 +39,10 @@ ROLE_BY_DOMAIN = {
         (Role.EMPLOYEE, "I'm taking the job", "I am the employee"),
         (Role.EMPLOYER, "I'm offering the job", "I am the employer"),
     ],
+    Domain.CONSUMER_TOS: [
+        (Role.CONSUMER, "I'm the user", "I am the customer / user"),
+        (Role.PROVIDER, "I run the service", "I am the company"),
+    ],
 }
 
 SEVERITY_STYLE = {
@@ -95,8 +99,18 @@ def main() -> None:
     )
     role = picked[0]
 
-    versions = _available_versions(domain)
-    if not versions:
+    if domain is Domain.CONSUMER_TOS:
+        from kwys.classify.unfair import active_detector
+
+        corpus_version = "v1"  # unused on this path: no numeric norms apply
+        if active_detector() == "rules":
+            st.info(
+                "Using the rule baseline for unfair clauses. It finds roughly a "
+                "third of what an expert would flag — train the detector for "
+                "better coverage."
+            )
+        versions = []
+    elif not (versions := _available_versions(domain)):
         st.warning(
             "No reference corpus is built yet, so nothing can be compared "
             "against what is normal. One-sided obligations and missing clauses "

@@ -1,0 +1,45 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # Core only. The ml/ocr extras pull ~2 GB of torch and model weights for
+      # tests that are deselected here anyway - the fast suite covers parsing,
+      # extraction, statistics, scoring and config, which is where regressions
+      # actually happen.
+      - name: Install
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Test
+        run: pytest
+
+  # The slow suite needs OCR models. Run it on demand rather than on every push.
+  slow:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv pip install --system -e ".[dev,ocr]"
+      - run: python tests/fixtures/make_fixture.py
+      - run: pytest -m slow

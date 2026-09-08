@@ -1,0 +1,29 @@
+# Scoring weights. Fixed, documented, and tuned ONCE on a dev split of the gold
+# set — never on the test split. PLAN.md section 6 requires reporting how
+# sensitive final precision/recall is to these numbers: a system whose output
+# swings wildly with the weights is not making an objective claim.
+
+version: 1
+
+weights:
+  # Deviation is the project's headline signal and must be able to carry a
+  # finding alone: at 0.55 no pure deviation could ever reach the 0.75 "high"
+  # threshold, however extreme. These are relative importances, not
+  # probabilities, and they are not required to sum to 1.
+  deviation: 0.85      # how far outside the norm, on the harmful side
+  asymmetry: 0.25      # a duty on one side with no counterpart
+  missing:   0.20      # a protection comparable agreements normally contain
+  semantic:  0.15      # gated outlier distance; the weakest leg by design
+
+thresholds:
+  high:   0.75
+  medium: 0.45
+  # below `medium` the finding is recorded but not shown by default: a report
+  # that flags twenty clauses has told the user nothing they can act on.
+
+shrinkage_k: 30        # n/(n+k) pull toward neutral on a thin corpus
+
+# A deviation on the harmful side must clear this percentile before it is worth
+# raising at all. Without it, every clause at the 60th percentile becomes a
+# finding and the report becomes noise.
+min_harm_percentile: 0.80

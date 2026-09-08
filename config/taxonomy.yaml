@@ -1,0 +1,190 @@
+# Clause taxonomy for Know What You Sign.
+# Each type declares the quantitative fields we try to extract from it.
+# `ledgar_hints` map to LEDGAR provision labels so the classifier can transfer.
+#
+# Keep this list SHORT. Every type added needs ~130 labelled examples to train
+# and its own reference distribution to be useful. 15 well-supported types beat
+# 40 starved ones.
+
+version: 1
+
+domains:
+  residential_lease:
+    display_name: Residential rental / lease agreement
+    roles: [tenant, landlord]
+    weaker_party: tenant          # the default signatory this tool serves
+    expected_clauses:             # used for missing-clause detection
+      - rent_and_escalation
+      - security_deposit
+      - deposit_refund
+      - lock_in_period
+      - notice_period
+      - termination
+      - maintenance_and_repairs
+      - dispute_resolution
+
+  employment_offer:
+    display_name: Employment offer / appointment letter
+    roles: [employee, employer]
+    weaker_party: employee
+    expected_clauses:
+      - notice_period
+      - probation
+      - bond_and_recovery
+      - confidentiality
+      - termination
+      - dispute_resolution
+
+clause_types:
+
+  rent_and_escalation:
+    display_name: Rent and annual increase
+    domains: [residential_lease]
+    fields:
+      monthly_rent_inr:      {kind: money,    unit: INR}
+      escalation_pct:        {kind: percent,  unit: pct_per_year}
+      escalation_period_months: {kind: duration, unit: months}
+    ledgar_hints: [Payments, Fees]
+
+  security_deposit:
+    display_name: Security deposit
+    domains: [residential_lease]
+    fields:
+      deposit_inr:           {kind: money,    unit: INR}
+      deposit_months:        {kind: ratio,    unit: months_of_rent, derived_from: [deposit_inr, monthly_rent_inr]}
+    ledgar_hints: [Payments]
+
+  deposit_refund:
+    display_name: Return of the deposit
+    domains: [residential_lease]
+    fields:
+      refund_days:           {kind: duration, unit: days}
+      deduction_allowed:     {kind: boolean}
+    ledgar_hints: [Payments, Terminations]
+
+  lock_in_period:
+    display_name: Minimum stay / lock-in
+    domains: [residential_lease]
+    fields:
+      lock_in_months:        {kind: duration, unit: months}
+    ledgar_hints: [Terms, Terminations]
+
+  notice_period:
+    display_name: Notice before leaving or ending
+    domains: [residential_lease, employment_offer]
+    fields:
+      notice_months:         {kind: duration, unit: months}
+      bound_party:           {kind: party}
+    ledgar_hints: [Notices, Terminations]
+
+  termination:
+    display_name: Ending the agreement
+    domains: [residential_lease, employment_offer]
+    fields:
+      cure_period_days:      {kind: duration, unit: days}
+      bound_party:           {kind: party}
+    ledgar_hints: [Terminations]
+
+  maintenance_and_repairs:
+    display_name: Repairs and upkeep
+    domains: [residential_lease]
+    fields:
+      threshold_inr:         {kind: money,    unit: INR}
+    ledgar_hints: [Maintenance]
+
+  use_restrictions:
+    display_name: Restrictions on how you may use the property
+    domains: [residential_lease]
+    fields: {}
+    ledgar_hints: [Use Of Property]
+
+  entry_and_inspection:
+    display_name: Owner's right to enter
+    domains: [residential_lease]
+    fields:
+      notice_hours:          {kind: duration, unit: hours}
+    ledgar_hints: [Access]
+
+  subletting:
+    display_name: Subletting and guests
+    domains: [residential_lease]
+    fields: {}
+    ledgar_hints: [Assignments]
+
+  penalty_and_late_fee:
+    display_name: Penalties and late payment charges
+    domains: [residential_lease, employment_offer]
+    fields:
+      late_fee_pct:          {kind: percent,  unit: pct_per_month}
+      late_fee_inr_per_day:  {kind: money,    unit: INR_per_day}
+      grace_days:            {kind: duration, unit: days}
+    ledgar_hints: [Fees, Payments]
+
+  dispute_resolution:
+    display_name: How disputes are settled (arbitration)
+    domains: [residential_lease, employment_offer]
+    fields:
+      seat_city:             {kind: place}
+      arbitrators_count:     {kind: count}
+      appointed_by:          {kind: party}
+    ledgar_hints: [Arbitration, Dispute Resolution]
+
+  governing_law:
+    display_name: Which courts have jurisdiction
+    domains: [residential_lease, employment_offer]
+    fields:
+      jurisdiction_city:     {kind: place}
+      exclusive:             {kind: boolean}
+    ledgar_hints: [Governing Laws, Jurisdictions, Venues]
+
+  indemnity:
+    display_name: Who pays if something goes wrong
+    domains: [residential_lease, employment_offer]
+    fields:
+      cap_inr:               {kind: money,    unit: INR}
+      bound_party:           {kind: party}
+    ledgar_hints: [Indemnifications]
+
+  # --- employment only ---
+
+  bond_and_recovery:
+    display_name: Service bond / training cost recovery
+    domains: [employment_offer]
+    fields:
+      bond_months:           {kind: duration, unit: months}
+      bond_amount_inr:       {kind: money,    unit: INR}
+    ledgar_hints: [Terms, Expenses]
+
+  probation:
+    display_name: Probation period
+    domains: [employment_offer]
+    fields:
+      probation_months:      {kind: duration, unit: months}
+    ledgar_hints: [Terms]
+
+  non_compete:
+    display_name: Restrictions on joining a competitor
+    domains: [employment_offer]
+    fields:
+      noncompete_months:     {kind: duration, unit: months}
+      radius_km:             {kind: distance, unit: km}
+    ledgar_hints: [Non-Compete]
+
+  confidentiality:
+    display_name: Confidentiality
+    domains: [employment_offer, residential_lease]
+    fields:
+      survival_months:       {kind: duration, unit: months}
+    ledgar_hints: [Confidentiality]
+
+  ip_assignment:
+    display_name: Ownership of what you create
+    domains: [employment_offer]
+    fields: {}
+    ledgar_hints: [Intellectual Property]
+
+  other:
+    display_name: Other / unclassified
+    domains: [residential_lease, employment_offer]
+    fields: {}
+    ledgar_hints: []

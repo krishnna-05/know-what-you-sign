@@ -1,0 +1,118 @@
+# DIRECTION MAP — which tail of the distribution is harmful, and to whom.
+#
+# WHY THIS FILE EXISTS
+# A percentile alone cannot express risk. A 15-day notice period and a 6-month
+# notice period are equally unusual; one is a gift to the tenant and the other a
+# trap. Statistics tell us what is RARE. This file tells us what is BAD.
+#
+# This is expert knowledge and we do not pretend otherwise. What makes it
+# defensible is that it is declarative, ~40 lines, versioned in git, and open to
+# challenge by any reader — unlike an opaque model or a sprawling rulebase.
+# The system LEARNS what is normal from data; it DECLARES what is harmful here.
+#
+# direction: +1  => a LARGER value is worse for this role
+#            -1  => a SMALLER value is worse for this role
+# Every entry needs a `rationale` in plain language. If you cannot write one,
+# you do not understand the field well enough to flag on it.
+
+version: 1
+
+fields:
+
+  # ---------- residential lease ----------
+
+  security_deposit.deposit_months:
+    tenant:   {direction: +1, rationale: "A bigger deposit is more of your money locked up with someone else."}
+    landlord: {direction: -1, rationale: "A smaller deposit is less security against damage or unpaid rent."}
+
+  deposit_refund.refund_days:
+    tenant:   {direction: +1, rationale: "The longer they can hold your deposit after you leave, the longer you are out of pocket — often when you most need it for the next place."}
+    landlord: {direction: -1, rationale: "A shorter window leaves less time to assess damage."}
+
+  lock_in_period.lock_in_months:
+    tenant:   {direction: +1, rationale: "A long lock-in means you owe rent even if you must leave early — for a job, an illness, a family reason."}
+    landlord: {direction: -1, rationale: "A short lock-in means the property may sit empty sooner."}
+
+  notice_period.notice_months:
+    # NOTE: resolved against `bound_party`, not the clause owner. See scorer.py.
+    tenant:   {direction: +1, rationale: "A long notice period means paying rent for months after you have decided to leave."}
+    landlord: {direction: +1, rationale: "A long notice period delays regaining the property."}
+
+  rent_and_escalation.escalation_pct:
+    tenant:   {direction: +1, rationale: "A steep annual increase can outpace your income."}
+    landlord: {direction: -1, rationale: "A low increase may not keep up with market rates."}
+
+  penalty_and_late_fee.late_fee_pct:
+    tenant:   {direction: +1, rationale: "A high late fee turns a short delay into a large debt."}
+    landlord: {direction: -1, rationale: "A low penalty is a weak deterrent against late payment."}
+
+  rent_and_escalation.escalation_period_months:
+    tenant:   {direction: -1, rationale: "A shorter gap between increases means the rent rises more often."}
+    landlord: {direction: +1, rationale: "A longer gap delays revision to market rates."}
+
+  penalty_and_late_fee.late_fee_inr_per_day:
+    tenant:   {direction: +1, rationale: "A high daily charge compounds quickly on a short delay."}
+    landlord: {direction: -1, rationale: "A low daily charge is a weak deterrent."}
+
+  penalty_and_late_fee.grace_days:
+    tenant:   {direction: -1, rationale: "Fewer grace days means a penalty for even a small delay."}
+    landlord: {direction: +1, rationale: "More grace days delays payment."}
+
+  entry_and_inspection.notice_hours:
+    tenant:   {direction: -1, rationale: "Less warning before someone enters your home means less privacy."}
+    landlord: {direction: +1, rationale: "More required notice makes inspection harder to arrange."}
+
+  maintenance_and_repairs.threshold_inr:
+    tenant:   {direction: +1, rationale: "A high threshold means you pay for more repairs before the owner contributes."}
+    landlord: {direction: -1, rationale: "A low threshold shifts repair costs onto the owner."}
+
+  termination.cure_period_days:
+    tenant:   {direction: -1, rationale: "A short cure period gives you little time to fix a problem before the agreement can be ended."}
+    landlord: {direction: -1, rationale: "A short cure period limits the time to remedy a breach."}
+
+  # ---------- employment ----------
+
+  bond_and_recovery.bond_months:
+    employee: {direction: +1, rationale: "A longer bond ties you to the job for longer, or costs you money to leave."}
+    employer: {direction: -1, rationale: "A shorter bond gives less protection for training investment."}
+
+  bond_and_recovery.bond_amount_inr:
+    employee: {direction: +1, rationale: "A larger recovery amount is a bigger penalty for leaving."}
+    employer: {direction: -1, rationale: "A smaller amount recovers less of the training cost."}
+
+  probation.probation_months:
+    employee: {direction: +1, rationale: "A longer probation means longer without full protections and benefits."}
+    employer: {direction: -1, rationale: "A shorter probation gives less time to assess a new hire."}
+
+  non_compete.noncompete_months:
+    employee: {direction: +1, rationale: "A longer restriction means longer before you can take a job in the field you know."}
+    employer: {direction: -1, rationale: "A shorter restriction offers less protection."}
+
+  non_compete.radius_km:
+    employee: {direction: +1, rationale: "A wider radius means you may have to move city to work in your field."}
+    employer: {direction: -1, rationale: "A narrower radius offers less protection."}
+
+  confidentiality.survival_months:
+    employee: {direction: +1, rationale: "A longer survival period keeps obligations on you long after you leave."}
+    employer: {direction: -1, rationale: "A shorter period ends protection sooner."}
+
+  # ---------- both ----------
+
+  dispute_resolution.seat_distance_km:
+    # computed, not extracted: distance from the signatory's own city
+    tenant:   {direction: +1, rationale: "If disputes must be heard in a distant city, travel and lawyer costs may exceed what you are arguing over — which in practice means you cannot enforce your rights at all."}
+    employee: {direction: +1, rationale: "As above: a distant venue can make a claim not worth bringing."}
+    landlord: {direction: +1, rationale: "A distant venue raises the cost of enforcement."}
+    employer: {direction: +1, rationale: "A distant venue raises the cost of enforcement."}
+
+  governing_law.jurisdiction_distance_km:
+    tenant:   {direction: +1, rationale: "Courts far from where you live make any claim expensive to pursue."}
+    employee: {direction: +1, rationale: "Courts far from where you work make any claim expensive to pursue."}
+    landlord: {direction: +1, rationale: "A distant court raises enforcement cost."}
+    employer: {direction: +1, rationale: "A distant court raises enforcement cost."}
+
+  indemnity.cap_inr:
+    tenant:   {direction: +1, rationale: "A higher cap means you could be liable for more."}
+    employee: {direction: +1, rationale: "A higher cap means you could be liable for more."}
+    landlord: {direction: -1, rationale: "A lower cap limits what can be recovered."}
+    employer: {direction: -1, rationale: "A lower cap limits what can be recovered."}

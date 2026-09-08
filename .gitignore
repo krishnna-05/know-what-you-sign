@@ -1,0 +1,56 @@
+# --- data: never commit contracts ---
+# Real agreements contain names, addresses, salaries, PAN/Aadhaar numbers.
+# Nothing under data/raw or data/gold goes to GitHub, ever.
+data/raw/**
+data/gold/**
+data/corpus/**
+!data/**/.gitkeep
+!data/**/README.md
+!data/corpus/schema.md
+!data/raw/provenance.example.json
+
+# The harvested judgment corpus IS committed: it is the research artefact, it
+# makes every reported figure reproducible, and each record carries the public
+# judgment URL it came from so any value can be checked. The raw page cache
+# stays out - it is large and refetchable.
+!data/corpus/judgments/
+!data/corpus/judgments/values.jsonl
+
+# built artefacts - all regenerable, none belong in git
+# norms: rebuild with `kwys build-norms` (or scripts/make_demo_norms.py)
+data/norms/*/
+# downloaded public corpora: refetch with scripts/fetch_datasets.py (~60 MB)
+data/external/
+models/
+*.onnx
+*.pt
+*.bin
+*.safetensors
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# notebooks
+.ipynb_checkpoints/
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/
+
+# secrets
+.env
+.env.*
+!.env.example
+.hypothesis/
+
+# harvested judgment cache - refetch with scripts/harvest_judgments.py
+data/corpus/judgments/cache/

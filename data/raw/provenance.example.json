@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy to provenance.json and fill in as you collect. See README.md.",
+  "lease_0001.pdf": {
+    "source": "template",
+    "origin": "https://example.com/rental-agreement-format",
+    "collected_on": "2026-09-08",
+    "licence": "public template, no stated restriction",
+    "city": "Bengaluru",
+    "state": "Karnataka",
+    "consent": null,
+    "scrubbed": true
+  }
+}

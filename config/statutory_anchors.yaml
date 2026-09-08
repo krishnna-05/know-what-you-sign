@@ -1,0 +1,127 @@
+# STATUTORY ANCHORS — a second, independent axis of evidence.
+#
+# A percentile says "unusual compared to other contracts". An anchor says
+# "unusual compared to what the law suggests". These are different kinds of
+# evidence and the report presents them SEPARATELY rather than blending them
+# into one score. Two independent signals pointing the same way is a much
+# stronger finding than either alone.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# SAFETY RULE — READ BEFORE ADDING ANYTHING
+#
+# Every anchor ships with `verified: false`. The scorer SKIPS unverified anchors
+# and logs a warning. To enable one you must:
+#   1. read the bare Act (indiacode.nic.in), not a summary, not a blog;
+#   2. confirm the section number and the exact figure;
+#   3. record who checked it and when;
+#   4. set verified: true.
+#
+# A wrong statutory citation in a tool aimed at people without legal training is
+# worse than no citation at all — it manufactures false confidence in exactly
+# the person least able to detect the error. Do not skip this.
+#
+# ALSO NOTE: the Model Tenancy Act 2021 is a MODEL law. It binds nobody until a
+# state adopts and notifies it, and states have amended it on adoption. The
+# `applies_in` field is not decoration — the scorer uses it, and where the
+# user's state has not adopted, the anchor is shown as guidance, never as law.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 1
+
+anchors:
+
+  security_deposit.deposit_months:
+    residential:
+      value: 2
+      comparison: max            # anchor is a ceiling; above it is adverse
+      unit: months_of_rent
+      source: "Model Tenancy Act, 2021, s.11(1)"
+      instrument: model_tenancy_act_2021
+      note: "Model Act caps residential security deposit at two months' rent."
+      applies_in: [__ADOPTING_STATES__]   # fill from the adoption table below
+      verified: false
+      verified_by: null
+      verified_on: null
+    non_residential:
+      value: 6
+      comparison: max
+      unit: months_of_rent
+      source: "Model Tenancy Act, 2021, s.11(1)"
+      instrument: model_tenancy_act_2021
+      note: "Higher cap applies to non-residential premises."
+      applies_in: [__ADOPTING_STATES__]
+      verified: false
+      verified_by: null
+      verified_on: null
+
+  deposit_refund.refund_days:
+    residential:
+      value: 0
+      comparison: max
+      unit: days
+      source: "Model Tenancy Act, 2021, s.11(2)"
+      instrument: model_tenancy_act_2021
+      note: >
+        The Model Act contemplates refund at the time of taking over vacant
+        possession, after due deduction — i.e. at handover, not after a waiting
+        period. CHECK THE EXACT WORDING before enabling: the operative phrase
+        and subsection number must be confirmed against the bare Act, and a
+        value of 0 days is an interpretation of "at the time of", not a figure
+        stated in the Act. Consider expressing this as a qualitative anchor
+        instead of a number.
+      applies_in: [__ADOPTING_STATES__]
+      verified: false
+      verified_by: null
+      verified_on: null
+
+  non_compete.noncompete_months:
+    all:
+      value: 0
+      comparison: max
+      unit: months
+      source: "Indian Contract Act, 1872, s.27"
+      instrument: indian_contract_act_1872
+      note: >
+        Section 27 renders agreements in restraint of trade void. Indian courts
+        have generally held POST-employment non-compete restrictions
+        unenforceable, while restrictions DURING employment are treated
+        differently. This is the single most useful anchor in the file for
+        employment offers, because the clause is near-universal in Indian offer
+        letters and very often unenforceable as written.
+        Phrase the finding as "commonly unenforceable in India", never as
+        "void" — enforceability is fact-specific and this tool does not decide it.
+      applies_in: [ALL_INDIA]
+      verified: false
+      verified_by: null
+      verified_on: null
+
+  # ── Anchors worth researching, deliberately left empty rather than guessed ──
+  #
+  # Do NOT populate these from memory or from a blog. Each needs the bare Act.
+  #
+  # notice_period.notice_months (employment)
+  #     State Shops & Establishments Acts set minimum notice, and the figure
+  #     VARIES BY STATE. There is no single national number. This must be a
+  #     per-state table or it must not exist.
+  #
+  # rent_and_escalation.escalation_pct
+  #     State Rent Control Acts, where they still apply, and the Model Tenancy
+  #     Act's revision-notice provisions. Highly state-specific.
+  #
+  # bond_and_recovery.bond_amount_inr
+  #     No statutory cap. Case law on reasonableness of liquidated damages
+  #     (Indian Contract Act s.74) is the relevant frame, not a number.
+  #     Probably better expressed as a qualitative flag than an anchor.
+  #
+  # entry_and_inspection.notice_hours
+  #     Model Tenancy Act has a provision on the landlord's right of entry with
+  #     prior notice. Confirm subsection and the period.
+
+# Which states have adopted the Model Tenancy Act, and in what form.
+# Adoption is ongoing and states amend on adoption — treat this as a snapshot
+# with a date, re-check before each release, and never let it silently go stale.
+model_tenancy_act_adoption:
+  last_checked: null            # set a date when you verify this
+  checked_by: null
+  source_url: null              # link the government notification you relied on
+  states: {}                    # {state: {adopted: bool, notified_on: date, deviations: str}}

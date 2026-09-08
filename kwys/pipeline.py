@@ -15,6 +15,8 @@ from pathlib import Path
 
 from kwys import config as C
 from kwys.asymmetry.obligations import (
+    PAIRED_FIELDS,
+    attribute_clause_to_party,
     extract_obligations,
     find_asymmetries,
     find_missing_clauses,
@@ -101,6 +103,7 @@ def analyse(
     pmap = build_party_map(parsed.text, domain)
     findings = []
 
+
     # --- consumer terms of service ------------------------------------------
     # A different problem shape: no numeric norms to deviate from, but an
     # expert-annotated set of unfairness categories to match against.
@@ -141,7 +144,18 @@ def analyse(
         terms = extract_terms(clause.clause_type, clause.text)
         clause_terms.append((clause, terms))
 
+        # Some fields belong to a PARTY, not to the agreement. A notice period
+        # is one side's obligation, and the same six months is a burden for
+        # whoever must give it and a benefit for the other. Scoring it without
+        # asking whose it is told a landlord "yours is 6 months" about a clause
+        # binding the tenant. Fields like the deposit or the lock-in belong to
+        # the agreement as a whole and are scored for either reader via the
+        # direction map.
+        bound = attribute_clause_to_party(clause, pmap)
+
         for term in terms:
+            if term.field in PAIRED_FIELDS and bound is not None and bound is not role:
+                continue
             scored = scorer.score_term(clause.clause_type, term)
             finding = scorer.finding_from_term(clause, scored)
             if finding:
@@ -194,13 +208,13 @@ def analyse(
     # stronger and more actionable finding than "no mirror clause found", and
     # both would otherwise fire on the same provision.
     paired_clause_ids = set()
-    for clause_id, detail, extra in find_paired_asymmetries(clause_terms, pmap):
+    for clause_id, detail, extra in find_paired_asymmetries(clause_terms, pmap, role):
         clause = by_id.get(clause_id)
         if clause:
             paired_clause_ids.update(extra["clauses"])
             findings.append(scorer.finding_from_paired(clause, detail, extra))
 
-    for clause_id, detail in find_asymmetries(clauses, obligations, pmap):
+    for clause_id, detail in find_asymmetries(clauses, obligations, pmap, role):
         if clause_id in paired_clause_ids:
             continue  # already reported, with numbers attached
         clause = by_id.get(clause_id)
@@ -239,6 +253,7 @@ def analyse(
             if finding:
                 findings.append(finding)
 
+    findings = _merge_same_clause_findings(findings)
     findings.sort(key=lambda f: f.score, reverse=True)
     if not show_low:
         findings = [f for f in findings if f.severity is not Severity.LOW]
@@ -256,6 +271,55 @@ def analyse(
         corpus_version=corpus_version if not norms.is_empty else None,
         warnings=warnings,
     )
+
+
+def _merge_same_clause_findings(findings: list) -> list:
+    """Fold a deviation finding into the asymmetry finding for the same clause.
+
+    Clause 4.1 was being reported twice: once as "you give 6 months, they give
+    15 days" and again as "yours is 6 months, the usual is 3". Both are true and
+    both are about the same number, so a reader sees the same clause twice and
+    has to work out they are one problem. Merged, they are a stronger single
+    finding than either alone - the imbalance AND the fact that your side of it
+    is also unusual.
+
+    The asymmetry finding survives because it is the more actionable of the two;
+    the norm comparison is appended to its evidence so nothing is lost from the
+    audit trail.
+    """
+    by_clause: dict[str, list] = {}
+    for f in findings:
+        by_clause.setdefault(f.clause_id, []).append(f)
+
+    merged = []
+    for group in by_clause.values():
+        if len(group) == 1:
+            merged.extend(group)
+            continue
+
+        asym = next((f for f in group if f.evidence.asymmetry), None)
+        deviation = next((f for f in group if f.evidence.norm is not None), None)
+
+        if asym is None or deviation is None:
+            merged.extend(group)
+            continue
+
+        norm = deviation.evidence.norm
+        asym.plain_language = (
+            f"{asym.plain_language} On top of that, your own figure is unusual: "
+            f"the usual across {norm.n} comparable agreements is "
+            f"{norm.median:g}, not {norm.value:g}."
+        )
+        # Carry the measurement into the surviving finding's evidence so the
+        # "show the working" panel still has the numbers.
+        asym.evidence.norm = norm
+        asym.evidence.term = deviation.evidence.term
+        asym.evidence.field = deviation.evidence.field
+        asym.score = round(min(1.0, max(asym.score, deviation.score) + 0.05), 3)
+        merged.append(asym)
+        merged.extend(f for f in group if f not in (asym, deviation))
+
+    return merged
 
 
 def unverified_anchor_warning() -> str | None:

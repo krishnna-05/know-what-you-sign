@@ -261,15 +261,60 @@ def doctor() -> None:
             console.print(f"  - {f}")
 
     console.print("\n[bold]Reference corpus[/bold]")
-    for domain in Domain:
-        store = NormStore.load(DATA / "norms", domain.value, "v1")
-        if store.is_empty:
-            console.print(f"  {domain.value}: [red]no norms built[/red]")
-            continue
-        usable = sum(1 for v in store.coverage().values() if v["sufficient"])
+    norms_root = DATA / "norms"
+    # Report EVERY built version, not a hardcoded "v1". The judgment corpus
+    # lives under judgments-v1, so the old check announced "no norms built"
+    # while a perfectly good store sat next to it.
+    versions = (
+        sorted(p.name for p in norms_root.iterdir() if p.is_dir())
+        if norms_root.exists()
+        else []
+    )
+    if not versions:
+        console.print("  [red]none built[/red] [dim](kwys build-norms-from-judgments)[/dim]")
+    for version in versions:
+        for domain in Domain:
+            if not (norms_root / version / domain.value).is_dir():
+                continue
+            store = NormStore.load(norms_root, domain.value, version)
+            usable = sum(1 for v in store.coverage().values() if v["sufficient"])
+            colour = "green" if usable else "yellow"
+            console.print(
+                f"  [{colour}]{version}[/{colour}] / {domain.value}: "
+                f"{len(store)} fields, {usable} usable (n>={MIN_N})"
+            )
+            for key, info in store.coverage().items():
+                mark = "[green]OK[/green]" if info["sufficient"] else "[yellow]thin[/yellow]"
+                console.print(f"      {mark}  {key}  n={info['n']}")
+            if store.corpus_bias:
+                console.print(f"      [dim]{store.corpus_bias[:88]}...[/dim]")
+
+    console.print("\n[bold]Unfair-clause detector (terms of service)[/bold]")
+    from kwys.classify.unfair import active_detector as unfair_detector
+
+    if unfair_detector() == "trained":
+        console.print("  [green]trained model[/green]")
+    else:
         console.print(
-            f"  {domain.value}: {len(store)} fields, {usable} above n={MIN_N}"
+            "  [yellow]rule baseline[/yellow] "
+            "[dim](macro-F1 0.34; train with scripts/train_classifier.py "
+            "--task unfair-tos)[/dim]"
         )
+
+    console.print("\n[bold]Optional components[/bold]")
+    from kwys.ingest.ocr import is_available as ocr_available
+    from kwys.norms.semantic import SemanticNorms
+
+    console.print(
+        "  OCR (scanned documents): "
+        + ("[green]available[/green]" if ocr_available() else "[yellow]not installed[/yellow]")
+    )
+    sem = SemanticNorms.load(DATA / "norms" / "semantic")
+    console.print(
+        "  Semantic centroids: "
+        + (f"[green]{len(sem.centroids)} clause types[/green]" if not sem.is_empty
+           else "[yellow]not built[/yellow]")
+    )
 
     console.print("\n[bold]Classifier[/bold]")
     from kwys.classify.model import MODEL_DIR, active_classifier

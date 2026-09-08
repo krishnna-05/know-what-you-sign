@@ -40,7 +40,11 @@ _SENTENCE = re.compile(r"(?<=[.;])\s+(?=[A-Z])")
 # A duty here with no counterpart is structurally lopsided, not merely unusual.
 MIRRORED_TYPES = {
     "notice_period": "notice before ending the agreement",
-    "termination": "the right to end the agreement",
+    # Deliberately neutral. This type covers both the RIGHT to terminate and the
+    # duties that follow one, and labelling the whole type "the right to end the
+    # agreement" produced nonsense on handover clauses: "only the tenant is
+    # bound here on the right to end the agreement".
+    "termination": "ending the agreement and what follows",
     "indemnity": "who compensates whom",
     "penalty_and_late_fee": "penalties for breach",
 }
@@ -104,7 +108,10 @@ def _predicate(sentence: str) -> str:
 
 
 def find_asymmetries(
-    clauses: list[Clause], obligations: list[Obligation], pmap: PartyMap
+    clauses: list[Clause],
+    obligations: list[Obligation],
+    pmap: PartyMap,
+    user_role: Role | None = None,
 ) -> list[tuple[str, str]]:
     """Duties on one side with no counterpart on the other.
 
@@ -112,6 +119,11 @@ def find_asymmetries(
     MIRRORED_TYPES are checked: plenty of provisions are one-sided by their
     nature (a tenant does not indemnify themselves) and flagging those would
     bury the real findings in noise.
+
+    `user_role` decides WHOSE one-sided duty is worth raising. An unmatched duty
+    on the counterparty is not a risk to the reader - it is a protection. Without
+    this the tool told a landlord "you must give six months' notice" about a
+    clause binding the tenant, which is the opposite of true.
     """
     by_type: dict[str, dict[Role, list[Obligation]]] = {}
     clause_types = {c.id: c.clause_type for c in clauses}
@@ -132,11 +144,14 @@ def find_asymmetries(
             other = counterparty.get(role)
             if other is None or per_role.get(other):
                 continue  # the mirror exists; nothing lopsided here
+            if user_role is not None and role is not user_role:
+                continue  # binds the other side: their problem, not the reader's
             subject = MIRRORED_TYPES[ctype]
+            who = "You are" if role is user_role else f"Only the {role.value} is"
             findings.append(
                 (
                     obs[0].clause_id,
-                    f"Only the {role.value} is bound here on {subject}. "
+                    f"{who} bound here on {subject}. "
                     f"No matching obligation on the {other.value} was found "
                     f"anywhere in the document.",
                 )
@@ -193,13 +208,20 @@ def attribute_clause_to_party(clause: Clause, pmap: PartyMap) -> Role | None:
 
 
 def find_paired_asymmetries(
-    clause_terms: list[tuple[Clause, list]], pmap: PartyMap
+    clause_terms: list[tuple[Clause, list]],
+    pmap: PartyMap,
+    user_role: Role | None = None,
 ) -> list[tuple[str, str, dict]]:
     """Compare the same field across both parties.
 
     `clause_terms` is [(clause, [Term, ...]), ...]. Returns
     (clause_id, explanation, detail) for each field where the two sides differ
     by more than PAIR_RATIO_THRESHOLD.
+
+    `user_role` decides both the wording and whether the imbalance is raised at
+    all. The heavier side of a lopsided pair is a burden for whoever carries it
+    and an advantage for the other party; reporting "you must give six months"
+    to the party who gives fifteen days is simply false.
     """
     # field -> role -> (value, clause_id, unit)
     collected: dict[str, dict[Role, tuple[float, str, str]]] = {}
@@ -232,12 +254,20 @@ def find_paired_asymmetries(
 
         subject = PAIRED_FIELDS[field_name]
         ratio = val_a / val_b
+
+        # role_a carries the heavier obligation. Only raise it for the party who
+        # actually bears it; for the other side this clause is an advantage.
+        if user_role is not None and role_a is not user_role:
+            continue
+
+        heavier = "You" if role_a is user_role else f"The {role_a.value}"
+        lighter = f"the {role_b.value}"
         out.append(
             (
                 cid_a,
                 (
-                    f"You must give {_fmt_period(val_a, unit)} of {subject}, but the "
-                    f"{role_b.value} need only give {_fmt_period(val_b, unit)} "
+                    f"{heavier} must give {_fmt_period(val_a, unit)} of {subject}, "
+                    f"but {lighter} need only give {_fmt_period(val_b, unit)} "
                     f"(clause {cid_b}) — {ratio:.0f} times less."
                 ),
                 {

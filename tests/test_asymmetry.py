@@ -104,3 +104,106 @@ def test_missing_clause_detection():
     missing = dict(find_missing_clauses(clauses, Domain.RESIDENTIAL_LEASE))
     assert "deposit_refund" in missing
     assert "rent_and_escalation" not in missing
+
+
+# --------------------------------------------------------------- role awareness
+
+def test_one_sided_duty_is_only_raised_for_the_party_it_binds():
+    """Regression: a landlord was told "you must give six months' notice" about
+    a clause binding the tenant. A duty on the OTHER side is not a risk to the
+    reader — it is a protection, and reporting it as a risk inverts the whole
+    premise of the tool."""
+    pmap = _pmap()
+    clauses = [
+        Clause(
+            id="4.1",
+            text="The Lessee shall give six months notice to the Lessor.",
+            clause_type="notice_period",
+        )
+    ]
+    obs = [o for c in clauses for o in extract_obligations(c, pmap)]
+
+    assert find_asymmetries(clauses, obs, pmap, Role.TENANT), (
+        "the tenant carries this duty and should be told"
+    )
+    assert not find_asymmetries(clauses, obs, pmap, Role.LANDLORD), (
+        "the landlord does not carry it and must not be warned about it"
+    )
+
+
+def test_paired_imbalance_is_worded_for_the_reader():
+    """The heavier side of a lopsided pair is a burden for whoever carries it
+    and an advantage for the other party."""
+    pmap = _pmap()
+    pairs = [
+        (
+            Clause(id="4.1", text="The Lessee shall give six (6) months notice to the Lessor."),
+            [Term(field="notice_months", raw="six months", value=6.0, unit="months")],
+        ),
+        (
+            Clause(id="4.2", text="The Lessor may terminate by giving fifteen (15) days notice."),
+            [Term(field="notice_months", raw="fifteen days", value=0.5, unit="months")],
+        ),
+    ]
+
+    as_tenant = find_paired_asymmetries(pairs, pmap, Role.TENANT)
+    assert as_tenant, "the tenant carries the heavier side and must be told"
+    assert as_tenant[0][1].startswith("You must give 6 months")
+
+    assert not find_paired_asymmetries(pairs, pmap, Role.LANDLORD), (
+        "this imbalance favours the landlord and is not their risk"
+    )
+
+
+def test_role_materially_changes_the_report():
+    """The project's central premise: risk depends on which side you are on. If
+    a tenant and a landlord get the same findings from a tenant-unfavourable
+    agreement, the tool is not doing what it claims."""
+    from pathlib import Path
+
+    from kwys.models import Domain
+    from kwys.pipeline import analyse
+
+    fixture = Path(__file__).parent / "fixtures" / "sample_lease.pdf"
+    if not fixture.exists():
+        import pytest
+
+        pytest.skip("run tests/fixtures/make_fixture.py first")
+
+    tenant = analyse(str(fixture), role=Role.TENANT, domain=Domain.RESIDENTIAL_LEASE)
+    landlord = analyse(str(fixture), role=Role.LANDLORD, domain=Domain.RESIDENTIAL_LEASE)
+
+    assert len(tenant.findings) > len(landlord.findings), (
+        "this fixture is deliberately tenant-unfavourable; the tenant must see more"
+    )
+    assert {f.clause_id for f in tenant.findings} != {f.clause_id for f in landlord.findings}
+
+
+def test_merged_finding_keeps_both_measurements():
+    """Regression: clause 4.1 was reported twice — once as an imbalance and once
+    as a deviation — so a reader saw the same clause twice and had to work out
+    they were one problem. Merged, but the numbers must survive into the
+    evidence or the audit trail loses them."""
+    from pathlib import Path
+
+    from kwys.models import Domain
+    from kwys.pipeline import analyse
+
+    fixture = Path(__file__).parent / "fixtures" / "sample_lease.pdf"
+    norms = Path(__file__).parent.parent / "data" / "norms" / "judgments-v1"
+    if not fixture.exists() or not norms.exists():
+        import pytest
+
+        pytest.skip("needs the fixture and the judgment norms")
+
+    result = analyse(
+        str(fixture), role=Role.TENANT, domain=Domain.RESIDENTIAL_LEASE,
+        corpus_version="judgments-v1",
+    )
+    ids = [f.clause_id for f in result.findings]
+    assert len(ids) == len(set(ids)), f"a clause is reported twice: {ids}"
+
+    merged = next((f for f in result.findings if f.clause_id == "4.1"), None)
+    if merged is not None:
+        assert merged.evidence.asymmetry
+        assert merged.evidence.norm is not None, "the measurement was lost in the merge"

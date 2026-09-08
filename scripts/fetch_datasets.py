@@ -112,8 +112,47 @@ def fetch_inlegalbert() -> Path:
     return Path(path)
 
 
+def fetch_unfair_tos() -> Path:
+    """LexGLUE unfair_tos: 50 terms-of-service documents, expert-annotated.
+
+    This is the CLAUDETTE annotation applied to consumer terms of service, and
+    it is this project's thesis in another domain: an unreadable document, a
+    signatory with no bargaining power, and clauses that are unfair in
+    identifiable, recurring ways.
+
+    Two things make it valuable here. The documents are public by design, unlike
+    rental agreements. And it ships with EXPERT LABELS, which means the unfair
+    clause detector can be evaluated against a published benchmark instead of
+    needing a lawyer to annotate a gold set by hand.
+    """
+    import json as _json
+
+    from datasets import load_dataset
+
+    out = DATA / "unfair_tos"
+    out.mkdir(parents=True, exist_ok=True)
+
+    print("Downloading unfair_tos (coastalcph/lex_glue, config 'unfair_tos')...")
+    ds = load_dataset("coastalcph/lex_glue", "unfair_tos")
+    names = ds["train"].features["labels"].feature.names
+    (out / "labels.json").write_text(_json.dumps(names, indent=2))
+
+    for split in ds:
+        with (out / f"{split}.jsonl").open("w") as fh:
+            for r in ds[split]:
+                fh.write(
+                    _json.dumps(
+                        {"text": r["text"], "labels": [names[i] for i in r["labels"]]}
+                    ) + "\n"
+                )
+        print(f"  {split}: {len(ds[split]):,} clauses -> {split}.jsonl")
+    print(f"  {len(names)} unfairness types -> labels.json")
+    return out
+
+
 TARGETS = {
     "ledgar": fetch_ledgar,
+    "unfair_tos": fetch_unfair_tos,
     "cuad": fetch_cuad,
     "inlegalbert": fetch_inlegalbert,
 }

@@ -52,7 +52,14 @@ ml = [
     "spacy>=3.7",
 ]
 ocr = [
-    "pytesseract>=0.3.10",
+    # RapidOCR runs on ONNX and needs no system binary, unlike Tesseract which
+    # requires a brew/apt install. That matters for a project meant to be
+    # deployable by someone without admin rights on their machine.
+    # It MUST be declared here rather than installed ad-hoc: installing it
+    # separately resolves numpy independently and silently upgrades past the
+    # numpy<2 pin that torch 2.2.2 needs, which breaks torch's numpy interop
+    # with a bare "Numpy is not available" at the first tensor conversion.
+    "rapidocr-onnxruntime>=1.4",
     "opencv-python-headless>=4.10",
     "pillow>=10.3",
 ]
@@ -90,4 +97,10 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# OCR tests take about a minute (model load plus recognition), which is long
+# enough to discourage running the suite. They are excluded by default and run
+# explicitly with `pytest -m slow` or in CI.
+addopts = "-q -m 'not slow'"
+markers = [
+    "slow: tests that load a model or run OCR (deselected by default)",
+]

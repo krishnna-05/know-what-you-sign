@@ -42,6 +42,13 @@ log = logging.getLogger(__name__)
 
 _WEIGHTS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "weights.yaml"
 
+# Within this radius the venue is the user's own metropolitan area and imposes
+# no real burden - courts in Gurugram are not a hardship for someone in Delhi.
+VENUE_NEARBY_KM = 60.0
+
+# Only the far tail is worth raising. Below this, "unusual wording" is noise.
+SEMANTIC_OUTLIER_PERCENTILE = 0.90
+
 
 def _load_weights() -> dict[str, Any]:
     with _WEIGHTS_PATH.open() as fh:
@@ -159,6 +166,9 @@ class Scorer:
             # An independent second signal pointing the same way. Additive, not
             # multiplicative: the two are different KINDS of evidence and the
             # report shows them separately rather than blending them.
+            # Only a binding instrument moves the score - a model law that the
+            # user's state has not adopted is shown as guidance and scored as
+            # nothing, because it is not law where they live.
             score = min(1.0, score + 0.15)
 
         evidence = Evidence(
@@ -228,6 +238,133 @@ class Scorer:
             plain_language=detail,
             question_to_ask="Ask for both notice periods to be set to the same length.",
             evidence=evidence,
+        )
+
+    def finding_from_venue(
+        self, clause: Clause, venue: str, distance_km: float, kind: str
+    ) -> Finding | None:
+        """A dispute venue far from where the user actually lives.
+
+        Not a deviation finding: it needs no corpus, because the harm is
+        arithmetic. If pursuing a Rs.60,000 deposit means travelling 2,000 km
+        and retaining a lawyer there, the right exists on paper and nowhere
+        else. Scored on distance because that IS the severity.
+        """
+        if distance_km < VENUE_NEARBY_KM:
+            return None
+
+        evidence = Evidence(
+            clause_id=clause.id,
+            clause_type=clause.clause_type or "other",
+            clause_text=clause.text,
+            field=f"{clause.clause_type}.{'seat' if kind == 'arbitration' else 'jurisdiction'}"
+            "_distance_km",
+            term=Term(
+                field="venue_distance_km", raw=venue, value=distance_km,
+                unit="km", extractor="geo",
+            ),
+            direction=+1,
+            direction_rationale=(
+                "If a dispute has to be heard in a distant city, the travel and "
+                "lawyer's fees can cost more than the amount in dispute — which "
+                "in practice means the right cannot be used at all."
+            ),
+            venue_distance_km=distance_km,
+        )
+        # Saturating: beyond roughly a day's travel the practical effect stops
+        # getting meaningfully worse, and a 2,500 km venue should not crowd out
+        # every other finding in the report.
+        score = min(0.92, 0.42 + 0.5 * min(distance_km / 1500.0, 1.0))
+        word = "arbitration" if kind == "arbitration" else "any court case"
+        return Finding(
+            clause_id=clause.id,
+            severity=self._severity(score),
+            score=round(score, 3),
+            headline=f"Disputes must be heard in {venue}",
+            plain_language=(
+                f"This agreement requires {word} to take place in {venue}, "
+                f"about {distance_km:,.0f} km from you. Travelling there and "
+                f"hiring a lawyer there may cost more than whatever you would "
+                f"be arguing about."
+            ),
+            question_to_ask=(
+                "Ask for disputes to be heard in your own city instead."
+            ),
+            evidence=evidence,
+        )
+
+    def finding_from_semantic(
+        self, clause: Clause, percentile: float, gate_reason: str
+    ) -> Finding | None:
+        """A clause that READS unlike others of its type.
+
+        Never fires alone. Semantic distance measures unusual, not harmful - an
+        unusually generous clause sits just as far from the centroid as an
+        unusually harsh one - so the caller must supply `gate_reason`: an
+        independent signal on the same clause that gives the distance a
+        direction. Weighted lowest of all the legs, and reported separately in
+        the evaluation so a reader can see how little of the performance rests
+        on it.
+        """
+        if percentile < SEMANTIC_OUTLIER_PERCENTILE:
+            return None
+
+        evidence = Evidence(
+            clause_id=clause.id,
+            clause_type=clause.clause_type or "other",
+            clause_text=clause.text,
+            semantic_outlier=round(percentile, 3),
+            asymmetry=True,
+            asymmetry_detail=gate_reason,
+        )
+        score = self.w["semantic"] * percentile + 0.35
+        return Finding(
+            clause_id=clause.id,
+            severity=self._severity(min(score, 1.0)),
+            score=round(min(score, 1.0), 3),
+            headline="This clause is worded unusually",
+            plain_language=(
+                f"This {C.display_name(clause.clause_type or 'clause').lower()} "
+                f"clause is worded differently from about "
+                f"{percentile:.0%} of comparable clauses. {gate_reason} "
+                "Unusual wording is not necessarily unfair, but it is worth "
+                "reading closely."
+            ),
+            question_to_ask="Ask what this clause means in plain language, and why it is needed.",
+            evidence=evidence,
+        )
+
+    def finding_from_unfair(self, clause: Clause, unfair_types: list[str]) -> Finding:
+        """A terms-of-service clause matching an expert-defined unfairness type.
+
+        Scored higher than most legs because the label set was defined by
+        lawyers (the CLAUDETTE scheme, as published in LexGLUE) rather than by
+        us, and because a clause carrying several types at once is compounding
+        rather than merely unusual.
+        """
+        from kwys.classify.unfair import describe
+
+        headline, question = describe(unfair_types[0])
+        score = min(0.94, 0.52 + 0.14 * (len(unfair_types) - 1))
+
+        detail = headline
+        if len(unfair_types) > 1:
+            others = ", ".join(describe(t)[0].lower() for t in unfair_types[1:])
+            detail = f"{headline}. It also means: {others}."
+
+        return Finding(
+            clause_id=clause.id,
+            severity=self._severity(score),
+            score=round(score, 3),
+            headline=headline,
+            plain_language=detail,
+            question_to_ask=question,
+            evidence=Evidence(
+                clause_id=clause.id,
+                clause_type=clause.clause_type or "other",
+                clause_text=clause.text,
+                unfair_types=unfair_types,
+            ),
         )
 
     def finding_from_missing(self, clause_type: str, detail: str) -> Finding:
@@ -303,9 +440,29 @@ class Scorer:
         ]
         if s.rationale:
             parts.append(s.rationale)
-        if anchor is not None and anchor.exceeded and anchor.applies:
-            parts.append(f"{anchor.note or ''} ({anchor.source})".strip())
+        if anchor is not None and anchor.exceeded:
+            parts.append(self._anchor_sentence(anchor))
         return " ".join(parts)
+
+    @staticmethod
+    def _anchor_sentence(anchor) -> str:
+        """Phrase a statutory reference according to whether it actually binds.
+
+        The Model Tenancy Act is a MODEL law: it binds nobody until a state
+        adopts it, and only four have. Telling a reader in a non-adopting state
+        that "the law caps this at two months" would be false, and false in the
+        direction that gets someone into an argument they cannot win. The figure
+        is still a useful reference point, so it is shown either way - with
+        different words.
+        """
+        note = (anchor.note or "").strip()
+        if anchor.applies:
+            return f"{note} ({anchor.source})".strip()
+        return (
+            f"{note} This is a model law that your state has not adopted, so it "
+            f"is a reference point rather than a rule that binds here. "
+            f"({anchor.source})"
+        ).strip()
 
     def _question(self, clause_type: str, s: ScoredTerm) -> str:
         assert s.norm is not None

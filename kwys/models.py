@@ -27,11 +27,14 @@ class Role(StrEnum):
     LANDLORD = "landlord"
     EMPLOYEE = "employee"
     EMPLOYER = "employer"
+    CONSUMER = "consumer"
+    PROVIDER = "provider"
 
 
 class Domain(StrEnum):
     RESIDENTIAL_LEASE = "residential_lease"
     EMPLOYMENT_OFFER = "employment_offer"
+    CONSUMER_TOS = "consumer_tos"
 
 
 class Severity(StrEnum):
@@ -192,7 +195,9 @@ class Evidence(BaseModel):
     asymmetry: bool = False
     asymmetry_detail: str | None = None
     missing_clause: bool = False
+    unfair_types: list[str] = Field(default_factory=list)  # LexGLUE unfair_tos labels
     semantic_outlier: float | None = None  # percentile of distance from centroid
+    venue_distance_km: float | None = None  # measured, not compared to a corpus
 
     @model_validator(mode="after")
     def _must_carry_something(self) -> Evidence:
@@ -202,12 +207,21 @@ class Evidence(BaseModel):
             self.asymmetry,
             self.missing_clause,
             self.semantic_outlier is not None,
+            # A dispute venue's distance is measured, not compared against a
+            # corpus: the harm is arithmetic. It is still evidence, and the
+            # figure is in the record.
+            self.venue_distance_km is not None,
+            # An unfairness category from an expert-annotated scheme is
+            # evidence in its own right, and a stronger kind than most here:
+            # the label set was defined by lawyers, not by us.
+            bool(self.unfair_types),
         )
         if not any(grounds):
             raise ValueError(
                 f"Evidence for clause {self.clause_id!r} carries no grounds. "
                 "Every finding must rest on a norm comparison, a statutory anchor, "
-                "an asymmetry, a missing clause, or a gated semantic outlier."
+                "an asymmetry, a missing clause, a measured venue distance, or a "
+                "gated semantic outlier."
             )
         return self
 

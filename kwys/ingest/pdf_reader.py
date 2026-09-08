@@ -170,7 +170,9 @@ def _strip_furniture(lines: list[Line], page_count: int) -> tuple[list[Line], in
     return kept, len(lines) - len(kept)
 
 
-def read_pdf(path: str | Path, *, strip_furniture: bool = True) -> ParsedDocument:
+def read_pdf(
+    path: str | Path, *, strip_furniture: bool = True, ocr: bool = True
+) -> ParsedDocument:
     """Read a PDF into typed lines carrying their typography and position.
 
     Raises FileNotFoundError if the path is wrong; returns a document with
@@ -190,11 +192,25 @@ def read_pdf(path: str | Path, *, strip_furniture: bool = True) -> ParsedDocumen
     )
 
     if scanned:
-        parsed.warnings.append(
-            f"{len(scanned)} of {page_count} pages have little or no extractable text "
-            f"and look scanned; OCR is needed for pages {scanned[:8]}"
-            f"{'...' if len(scanned) > 8 else ''}."
-        )
+        from kwys.ingest.ocr import is_available, ocr_document
+
+        if ocr and is_available():
+            log.info("OCR-ing %d scanned page(s)", len(scanned))
+            ocr_lines, ocr_warnings = ocr_document(str(path), scanned)
+            # Interleave by page so clause order follows the document, not the
+            # order in which the two readers happened to run.
+            parsed.lines = sorted(
+                parsed.lines + ocr_lines, key=lambda ln: (ln.page, ln.bbox[1])
+            )
+            for i, ln in enumerate(parsed.lines):
+                ln.order = i
+            parsed.warnings.extend(ocr_warnings)
+        else:
+            parsed.warnings.append(
+                f"{len(scanned)} of {page_count} pages have no selectable text and "
+                f"look scanned, and OCR is not installed, so those pages were not "
+                f"read at all. Install it with: uv pip install -e '.[ocr]'"
+            )
 
     if strip_furniture:
         parsed.lines, removed = _strip_furniture(parsed.lines, page_count)

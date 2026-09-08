@@ -23,7 +23,7 @@ from kwys.asymmetry.obligations import (
 from kwys.asymmetry.parties import build_party_map
 from kwys.classify.model import classify_clauses
 from kwys.extract.patterns import contradiction_warning, extract_terms
-from kwys.models import AnalysisResult, Document, Domain, Role, Severity
+from kwys.models import AnalysisResult, Document, Domain, Modality, Role, Severity
 from kwys.norms.store import NormStore
 from kwys.score.scorer import Scorer
 from kwys.segment.segmenter import segment
@@ -74,6 +74,7 @@ def analyse(
     norms = NormStore.load(
         norms_root or (DATA_ROOT / "norms"), domain.value, corpus_version
     )
+    is_tos = domain is Domain.CONSUMER_TOS
     if norms.corpus_bias:
         # A corpus's bias must reach the reader, not just sit in the manifest.
         # Percentiles from litigated tenancies and percentiles from a random
@@ -88,7 +89,7 @@ def analyse(
             "with `kwys build-norms` before showing this to anyone."
         )
 
-    if norms.is_empty:
+    if norms.is_empty and not is_tos:
         warnings.append(
             "No reference corpus is loaded, so no clause can be compared against "
             "what is normal. Only one-sided obligations and missing clauses are "
@@ -99,6 +100,33 @@ def analyse(
     scorer = Scorer(domain=domain, role=role, norms=norms, user_state=user_state)
     pmap = build_party_map(parsed.text, domain)
     findings = []
+
+    # --- consumer terms of service ------------------------------------------
+    # A different problem shape: no numeric norms to deviate from, but an
+    # expert-annotated set of unfairness categories to match against.
+    if domain is Domain.CONSUMER_TOS:
+        from kwys.classify.unfair import active_detector
+        from kwys.classify.unfair import predict as predict_unfair
+
+        for clause in clauses:
+            unfair = predict_unfair(clause.text)
+            if unfair:
+                findings.append(scorer.finding_from_unfair(clause, unfair))
+
+        findings.sort(key=lambda f: f.score, reverse=True)
+        if active_detector() == "rules":
+            warnings.append(
+                "No trained unfair-clause detector was found, so this used the "
+                "rule baseline, which finds roughly a third of what an expert "
+                "would flag. Train one with: python scripts/train_classifier.py "
+                "--task unfair-tos"
+            )
+        return AnalysisResult(
+            document=document,
+            findings=findings,
+            clauses_checked=len(clauses),
+            warnings=warnings,
+        )
 
     # --- deviation findings -------------------------------------------------
     clause_terms: list[tuple] = []
@@ -118,6 +146,45 @@ def analyse(
             finding = scorer.finding_from_term(clause, scored)
             if finding:
                 findings.append(finding)
+
+    # --- venue distance -----------------------------------------------------
+    # Needs no corpus: the harm is arithmetic, not statistical.
+    if user_city:
+        from kwys.extract.geo import distance_between, lookup
+
+        if lookup(user_city) is None:
+            warnings.append(
+                f"'{user_city}' was not recognised, so the distance to any "
+                "arbitration or court venue could not be checked."
+            )
+        else:
+            # An agreement usually names the same city as the arbitration seat
+            # AND as the exclusive court jurisdiction. Reporting both produces
+            # two near-identical findings for one problem, so they are collapsed
+            # to the first clause that names each distinct venue.
+            venues_seen: set[str] = set()
+            for clause, terms in clause_terms:
+                for term in terms:
+                    if term.field not in ("seat_city", "jurisdiction_city"):
+                        continue
+                    venue = str(term.value)
+                    key = venue.strip().lower()
+                    if key in venues_seen:
+                        continue
+                    km = distance_between(user_city, venue)
+                    if km is None:
+                        warnings.append(
+                            f"Clause {clause.id} names '{venue}' as the venue, "
+                            "which was not recognised, so its distance from you "
+                            "could not be checked."
+                        )
+                        venues_seen.add(key)
+                        continue
+                    kind = "arbitration" if term.field == "seat_city" else "court"
+                    finding = scorer.finding_from_venue(clause, venue, km, kind)
+                    if finding:
+                        findings.append(finding)
+                    venues_seen.add(key)
 
     # --- structural findings ------------------------------------------------
     obligations = [o for c in clauses for o in extract_obligations(c, pmap)]
@@ -142,6 +209,35 @@ def analyse(
 
     for clause_type, detail in find_missing_clauses(clauses, domain):
         findings.append(scorer.finding_from_missing(clause_type, detail))
+
+    # --- semantic outliers, GATED ------------------------------------------
+    # Distance from the centroid says a clause is unusual, not that it is
+    # harmful: an unusually generous clause is equally far out. It therefore
+    # only surfaces on a clause that ALREADY carries an independent signal -
+    # here, an obligation on the user with no counterpart on the other side.
+    from kwys.norms.semantic import SemanticNorms
+
+    semantic = SemanticNorms.load(DATA_ROOT / "norms" / "semantic")
+    if not semantic.is_empty:
+        gated: dict[str, str] = {}
+        for ob in obligations:
+            if ob.role is role and ob.modality is not Modality.RIGHT:
+                gated.setdefault(
+                    ob.clause_id,
+                    f"It places an obligation on you ({ob.predicate[:60]}).",
+                )
+        already = {f.clause_id for f in findings}
+        for clause in clauses:
+            if clause.id in already or clause.id not in gated:
+                continue
+            if not clause.clause_type or clause.clause_type == "other":
+                continue
+            pct = semantic.outlier_percentile(clause.clause_type, clause.text)
+            if pct is None:
+                continue
+            finding = scorer.finding_from_semantic(clause, pct, gated[clause.id])
+            if finding:
+                findings.append(finding)
 
     findings.sort(key=lambda f: f.score, reverse=True)
     if not show_low:

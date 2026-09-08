@@ -35,24 +35,35 @@ anchors:
       value: 2
       comparison: max            # anchor is a ceiling; above it is adverse
       unit: months_of_rent
-      source: "Model Tenancy Act, 2021, s.11(1)"
+      source: "Model Tenancy Act, 2021, s.11"
       instrument: model_tenancy_act_2021
-      note: "Model Act caps residential security deposit at two months' rent."
-      applies_in: [__ADOPTING_STATES__]   # fill from the adoption table below
-      verified: false
-      verified_by: null
-      verified_on: null
+      note: >
+        The Model Tenancy Act 2021 provides that the security deposit may not
+        exceed two months' rent for residential premises.
+      quote: >
+        "The security deposit may not exceed: (i) two months' rent for
+        residential premises, and (ii) six-months' rent for non-residential
+        premises."
+      applies_in: [Assam, Uttar Pradesh]
+      verified: true
+      verified_by: "claude-opus-5 via PRS India Legislative Brief on the Model Tenancy Act 2021"
+      verified_on: "2026-09-08"
     non_residential:
       value: 6
       comparison: max
       unit: months_of_rent
-      source: "Model Tenancy Act, 2021, s.11(1)"
+      source: "Model Tenancy Act, 2021, s.11"
       instrument: model_tenancy_act_2021
-      note: "Higher cap applies to non-residential premises."
-      applies_in: [__ADOPTING_STATES__]
-      verified: false
-      verified_by: null
-      verified_on: null
+      note: >
+        The higher cap of six months' rent applies to non-residential premises.
+      quote: >
+        "The security deposit may not exceed: (i) two months' rent for
+        residential premises, and (ii) six-months' rent for non-residential
+        premises."
+      applies_in: [Assam, Uttar Pradesh]
+      verified: true
+      verified_by: "claude-opus-5 via PRS India Legislative Brief on the Model Tenancy Act 2021"
+      verified_on: "2026-09-08"
 
   deposit_refund.refund_days:
     residential:
@@ -62,17 +73,20 @@ anchors:
       source: "Model Tenancy Act, 2021, s.11(2)"
       instrument: model_tenancy_act_2021
       note: >
-        The Model Act contemplates refund at the time of taking over vacant
-        possession, after due deduction — i.e. at handover, not after a waiting
-        period. CHECK THE EXACT WORDING before enabling: the operative phrase
-        and subsection number must be confirmed against the bare Act, and a
-        value of 0 days is an interpretation of "at the time of", not a figure
-        stated in the Act. Consider expressing this as a qualitative anchor
-        instead of a number.
-      applies_in: [__ADOPTING_STATES__]
-      verified: false
-      verified_by: null
-      verified_on: null
+        The Model Act provides for refund at the time of taking over vacant
+        possession, after due deductions. It states NO waiting period, so any
+        stated refund window departs from it. The 0 here encodes "at handover"
+        and is an interpretation of the Act's wording, not a figure the Act
+        contains — the report must therefore phrase this as "the Act provides
+        for refund at handover", never as "the Act allows 0 days".
+      quote: >
+        "The security deposit will be refunded by the landlord to the tenant at
+        the time of taking over vacant possession of the premises, after making
+        due deductions."
+      applies_in: [Assam, Uttar Pradesh]
+      verified: true
+      verified_by: "claude-opus-5 via PRS India Legislative Brief on the Model Tenancy Act 2021"
+      verified_on: "2026-09-08"
 
   non_compete.noncompete_months:
     all:
@@ -82,18 +96,24 @@ anchors:
       source: "Indian Contract Act, 1872, s.27"
       instrument: indian_contract_act_1872
       note: >
-        Section 27 renders agreements in restraint of trade void. Indian courts
-        have generally held POST-employment non-compete restrictions
+        Section 27 makes an agreement restraining anyone from exercising a
+        lawful profession, trade or business void TO THAT EXTENT. Indian courts
+        have generally treated POST-employment non-compete restrictions as
         unenforceable, while restrictions DURING employment are treated
-        differently. This is the single most useful anchor in the file for
-        employment offers, because the clause is near-universal in Indian offer
-        letters and very often unenforceable as written.
+        differently; the one statutory exception concerns the sale of goodwill.
+        This is the most useful anchor in the file for employment offers,
+        because the clause is near-universal in Indian offer letters and often
+        unenforceable as written.
         Phrase the finding as "commonly unenforceable in India", never as
         "void" — enforceability is fact-specific and this tool does not decide it.
+      quote: >
+        "27. Agreement in restraint of trade, void.— Every agreement by which
+        any one is restrained from exercising a lawful profession, trade or
+        business of any kind, is to that extent void."
       applies_in: [ALL_INDIA]
-      verified: false
-      verified_by: null
-      verified_on: null
+      verified: true
+      verified_by: "claude-opus-5 via bare Act text, cross-checked against two independent sources"
+      verified_on: "2026-09-08"
 
   # ── Anchors worth researching, deliberately left empty rather than guessed ──
   #
@@ -121,7 +141,20 @@ anchors:
 # Adoption is ongoing and states amend on adoption — treat this as a snapshot
 # with a date, re-check before each release, and never let it silently go stale.
 model_tenancy_act_adoption:
-  last_checked: null            # set a date when you verify this
-  checked_by: null
-  source_url: null              # link the government notification you relied on
-  states: {}                    # {state: {adopted: bool, notified_on: date, deviations: str}}
+  last_checked: "2026-09-08"
+  checked_by: "claude-opus-5"
+  source_url: "https://prsindia.org/billtrack/the-model-tenancy-act-2021"
+  note: >
+    The Model Tenancy Act is a MODEL law. It binds nobody until a state adopts
+    and notifies it. As at the date above only four states had ratified it, and
+    two of those legislated BEFORE the final Model Act was approved, so their
+    figures may differ and are NOT assumed here. Karnataka and Maharashtra have
+    announced rules based on the Act without formally adopting it.
+    Re-check before any release: adoption is ongoing.
+  states:
+    Assam:          {adopted: true,  notified_on: "2021", deviations: "enacted after the Model Act"}
+    Uttar Pradesh:  {adopted: true,  notified_on: "2021", deviations: "enacted after the Model Act"}
+    Tamil Nadu:     {adopted: false, notified_on: "2017", deviations: "own tenancy law, PREDATES the Model Act; figures not verified here"}
+    Andhra Pradesh: {adopted: false, notified_on: "2018", deviations: "own tenancy law, PREDATES the Model Act; figures not verified here"}
+    Karnataka:      {adopted: false, notified_on: null,   deviations: "rules announced based on the Act; not a formal adoption"}
+    Maharashtra:    {adopted: false, notified_on: null,   deviations: "rules announced based on the Act; not a formal adoption"}

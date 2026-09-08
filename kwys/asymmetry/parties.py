@@ -35,11 +35,17 @@ ROLE_ALIASES: dict[Role, set[str]] = {
         "employer", "company", "organisation", "organization", "management",
         "the firm", "corporation",
     },
+    Role.CONSUMER: {"you", "user", "customer", "member", "subscriber", "visitor"},
+    Role.PROVIDER: {
+        "we", "us", "our", "company", "service", "platform", "provider",
+        "the site", "the website", "the app",
+    },
 }
 
 DOMAIN_ROLES: dict[Domain, tuple[Role, Role]] = {
     Domain.RESIDENTIAL_LEASE: (Role.TENANT, Role.LANDLORD),
     Domain.EMPLOYMENT_OFFER: (Role.EMPLOYEE, Role.EMPLOYER),
+    Domain.CONSUMER_TOS: (Role.CONSUMER, Role.PROVIDER),
 }
 
 # "hereinafter referred to as the LESSEE" / "(hereinafter the "Tenant")"

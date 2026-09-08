@@ -39,6 +39,7 @@ DATA = ROOT / "data"
 # the ablation baselines the evaluation requires - all three, same split.
 BASE_MODELS = {
     "inlegalbert": "law-ai/InLegalBERT",
+    "distilbert": "distilbert-base-uncased",
     "legalbert": "nlpaueb/legal-bert-base-uncased",
     "deberta": "microsoft/deberta-v3-base",
 }
@@ -85,6 +86,156 @@ def _tokenize(tokenizer, texts: list[str], max_length: int):
     return tokenizer(
         texts, truncation=True, padding="max_length", max_length=max_length
     )
+
+
+def train_multilabel(
+    *,
+    base: str,
+    out: Path,
+    data_dir: Path,
+    epochs: float,
+    batch_size: int,
+    max_length: int,
+    lr: float,
+    limit: int | None,
+) -> Path:
+    """Train the unfair-clause detector on LexGLUE unfair_tos.
+
+    Different from the clause-type head in two ways that matter:
+
+    MULTI-LABEL. One clause can be several kinds of unfair at once - a
+    jurisdiction clause is routinely also a choice-of-law clause. Each label
+    gets its own sigmoid rather than competing in a softmax.
+
+    SEVERELY IMBALANCED. 89% of clauses carry no label at all. Accuracy is
+    therefore meaningless (predicting "fair" for everything scores 89%), and
+    even micro-F1 flatters. Macro-F1 over the eight unfair types is the number
+    to report, and per-class recall is what actually matters: missing an unfair
+    clause is the failure that hurts the user, so the threshold is tuned for
+    recall on the validation split rather than left at 0.5.
+    """
+    import numpy as np
+    import torch
+    from sklearn.metrics import classification_report, f1_score
+    from torch.utils.data import Dataset
+    from transformers import (
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        Trainer,
+        TrainingArguments,
+    )
+
+    label_names = json.loads((data_dir / "labels.json").read_text())
+    label_to_id = {n: i for i, n in enumerate(label_names)}
+
+    def load(split: str) -> list[dict]:
+        rows = _load_jsonl(data_dir / f"{split}.jsonl")
+        return rows[:limit] if limit else rows
+
+    train_rows, eval_rows = load("train"), load("validation")
+    log.info(
+        "unfair_tos: %d train / %d eval, %d labels, base=%s",
+        len(train_rows), len(eval_rows), len(label_names), base,
+    )
+
+    base = _ensure_loadable(base)
+    tokenizer = AutoTokenizer.from_pretrained(base)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        base,
+        num_labels=len(label_names),
+        problem_type="multi_label_classification",
+        id2label=dict(enumerate(label_names)),
+        label2id=label_to_id,
+        ignore_mismatched_sizes=True,
+    )
+
+    class ToSDataset(Dataset):
+        def __init__(self, rows: list[dict]) -> None:
+            self.enc = _tokenize(tokenizer, [r["text"] for r in rows], max_length)
+            self.labels = []
+            for r in rows:
+                vec = [0.0] * len(label_names)
+                for lab in r["labels"]:
+                    vec[label_to_id[lab]] = 1.0
+                self.labels.append(vec)
+
+        def __len__(self) -> int:
+            return len(self.labels)
+
+        def __getitem__(self, i: int) -> dict:
+            item = {k: torch.tensor(v[i]) for k, v in self.enc.items()}
+            item["labels"] = torch.tensor(self.labels[i], dtype=torch.float)
+            return item
+
+    def metrics(pred):
+        probs = 1 / (1 + np.exp(-pred.predictions))
+        hard = (probs >= 0.5).astype(int)
+        return {
+            "macro_f1": f1_score(pred.label_ids, hard, average="macro", zero_division=0),
+            "micro_f1": f1_score(pred.label_ids, hard, average="micro", zero_division=0),
+        }
+
+    out.mkdir(parents=True, exist_ok=True)
+    trainer = Trainer(
+        model=model,
+        args=TrainingArguments(
+            output_dir=str(out / "checkpoints"),
+            num_train_epochs=epochs,
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size * 2,
+            learning_rate=lr,
+            eval_strategy="epoch",
+            save_strategy="epoch",
+            load_best_model_at_end=True,
+            metric_for_best_model="macro_f1",
+            logging_steps=50,
+            report_to=[],
+            use_cpu=not torch.cuda.is_available(),
+            seed=20260908,
+        ),
+        train_dataset=ToSDataset(train_rows),
+        eval_dataset=ToSDataset(eval_rows),
+        compute_metrics=metrics,
+    )
+    trainer.train()
+
+    # Threshold tuning, on VALIDATION only. Recall is weighted above precision
+    # because a missed unfair clause is the failure mode that hurts the user,
+    # while a false flag merely costs them a moment reading it.
+    val = trainer.predict(ToSDataset(eval_rows))
+    probs = 1 / (1 + np.exp(-val.predictions))
+    best_t, best_score = 0.5, -1.0
+    for t in np.arange(0.10, 0.71, 0.05):
+        hard = (probs >= t).astype(int)
+        f2 = f1_score(val.label_ids, hard, average="macro", zero_division=0)
+        recall = (hard * val.label_ids).sum() / max(1, val.label_ids.sum())
+        combined = 0.4 * f2 + 0.6 * recall
+        if combined > best_score:
+            best_t, best_score = float(t), combined
+    log.info("tuned decision threshold: %.2f", best_t)
+
+    test_rows = load("test")
+    test = trainer.predict(ToSDataset(test_rows))
+    test_probs = 1 / (1 + np.exp(-test.predictions))
+    hard = (test_probs >= best_t).astype(int)
+
+    report = classification_report(
+        test.label_ids, hard, target_names=label_names,
+        zero_division=0, output_dict=True,
+    )
+    macro = f1_score(test.label_ids, hard, average="macro", zero_division=0)
+    micro = f1_score(test.label_ids, hard, average="micro", zero_division=0)
+    log.info("TEST macro-F1 %.4f | micro-F1 %.4f (threshold %.2f)", macro, micro, best_t)
+
+    trainer.save_model(str(out))
+    tokenizer.save_pretrained(str(out))
+    (out / "eval_report.json").write_text(json.dumps({
+        "task": "unfair_tos", "base_model": base, "labels": label_names,
+        "threshold": best_t, "test_macro_f1": macro, "test_micro_f1": micro,
+        "per_class": report, "n_train": len(train_rows), "n_test": len(test_rows),
+    }, indent=2))
+    log.info("Saved to %s", out)
+    return out
 
 
 def train(
@@ -243,7 +394,9 @@ def train(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--stage", type=int, choices=(1, 2), required=True)
+    ap.add_argument("--stage", type=int, choices=(1, 2), default=None)
+    ap.add_argument("--task", choices=("clause-type", "unfair-tos"), default="clause-type",
+                    help="clause-type = provision classifier; unfair-tos = unfair-clause detector")
     ap.add_argument(
         "--base", default="inlegalbert",
         help=f"one of {list(BASE_MODELS)}, or any Hugging Face model id",
@@ -260,6 +413,25 @@ def main() -> int:
     args = ap.parse_args()
 
     base = BASE_MODELS.get(args.base, args.base)
+
+    if args.task == "unfair-tos":
+        data_dir = DATA / "external" / "unfair_tos"
+        if not data_dir.exists():
+            raise SystemExit(
+                f"unfair_tos not found at {data_dir}. "
+                "Run: python scripts/fetch_datasets.py unfair_tos"
+            )
+        train_multilabel(
+            base=BASE_MODELS.get(args.base, args.base),
+            out=args.out or DATA / "models" / "unfair-tos",
+            data_dir=data_dir, epochs=args.epochs, batch_size=args.batch_size,
+            max_length=args.max_length, lr=args.lr, limit=args.limit,
+        )
+        return 0
+
+    if args.stage is None:
+        raise SystemExit("--stage is required for the clause-type task (1 or 2)")
+
     stage1_out = DATA / "models" / "ledgar-stage1"
 
     if args.stage == 2 and not args.from_base:

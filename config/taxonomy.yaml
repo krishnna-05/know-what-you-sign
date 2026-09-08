@@ -23,6 +23,16 @@ domains:
       - maintenance_and_repairs
       - dispute_resolution
 
+  consumer_tos:
+    display_name: Website or app terms of service
+    roles: [consumer, provider]
+    weaker_party: consumer
+    # Unlike the other two domains this has no expected-clause list: terms of
+    # service vary far too much in structure for absence to mean anything, and
+    # a missing-clause finding would be noise. Detection here is by unfairness
+    # TYPE (LexGLUE unfair_tos), not by deviation from a numeric norm.
+    expected_clauses: []
+
   employment_offer:
     display_name: Employment offer / appointment letter
     roles: [employee, employer]

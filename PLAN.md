@@ -4,6 +4,27 @@
 
 ---
 
+> **Status note (updated during implementation).** Several assumptions in this
+> plan turned out to be wrong in ways worth recording, because they changed the
+> project:
+>
+> - **§0.2 is the big one.** Real executed rental agreements are not obtainable
+>   at all — not privately, not publicly. Government templates exist in
+>   abundance and contain `Rs. ______` with no figures. The corpus instead comes
+>   from **published court judgments**, which recite the operative terms of
+>   agreements people actually signed. Bias: only disputed tenancies reach
+>   court. See §3 and `kwys/harvest/judgments.py`.
+> - **§5.2's semantic leg does not work as designed.** Measured, and inverted on
+>   indemnity clauses. Kept, gated, weighted lowest, and documented with the
+>   numbers rather than quietly dropped. See §8.
+> - **A second domain was added** — consumer terms of service — because it
+>   supplies expert ground truth and therefore removes the dependency on finding
+>   law students to annotate 40 contracts (§3.4).
+> - **Two scoring bugs** found only by running on real documents: the harm gate
+>   was applied to the shrunk percentile, silently making small corpora
+>   unreportable; and deviation was weighted so it could never reach high
+>   severity alone.
+
 ## 0. Scope decisions to make before writing code
 
 Three decisions determine whether this project succeeds. Make them now.
@@ -381,6 +402,10 @@ split along that line. If solo, the corpus is the critical path; start it week 1
 
 ## 8. Known limitations to state up front (do not let a reviewer find these first)
 
+> **Measured, not anticipated.** Items 7-9 were found by running the system, not
+> by reasoning about it in advance. They belong in the write-up with their
+> numbers.
+
 1. **Norms are descriptive, not normative.** If 90% of agreements in the corpus are landlord-favourable, the
    system will treat landlord-favourable as normal. Mitigate by pairing every percentile with the statutory anchor
    where one exists, and say this explicitly.
@@ -394,6 +419,22 @@ split along that line. If solo, the corpus is the critical path; start it week 1
 5. **Jurisdiction.** Norms are India-specific and largely metro-weighted. Do not claim generality.
 6. **Semantic-outlier leg is weak** relative to the quantitative leg. Report its contribution separately in the
    ablation so a reader can see how much of the performance is carried by the solid part.
+7. **The semantic leg is not merely weak, it is inverted on some clause types.**
+   Measured: an ordinary indemnity scores 92nd percentile for unusualness while
+   one covering the landlord's own negligence scores 72nd. LEDGAR indemnities
+   are verbose US commercial provisions, so a short plain Indian rental clause
+   reads as unusual and a verbose abusive one reads as familiar. Fixing it needs
+   centroids from Indian consumer contracts — the same corpus problem again.
+8. **The judgment corpus is a litigation sample, not a market sample.** Only
+   disputed tenancies reach court. The median deposit in it is 6.6 months' rent,
+   which is high, and consistent with both the litigation bias and Bengaluru's
+   10-month convention. Every report built on it carries this warning; do not
+   quietly drop it when quoting a percentile.
+9. **The rule baseline finds about a third of what experts flag.** Macro-F1
+   0.340 on the unfair_tos held-out test split (precision 0.613, recall 0.361).
+   Precise but cautious — the wrong tradeoff for a tool where a missed clause is
+   the failure that hurts the user. Reported as the baseline the trained model
+   must beat.
 
 ---
 

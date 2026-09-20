@@ -54,3 +54,28 @@ htmlcov/
 
 # harvested judgment cache - refetch with scripts/harvest_judgments.py
 data/corpus/judgments/cache/
+
+# --- web interface ---
+# Dependencies and build output: regenerable with `npm ci && npm run build`.
+# package-lock.json IS committed - it is what makes that reproducible.
+web/node_modules/
+web/dist/
+web/.vite/
+web/build/
+
+# Vite / node scratch
+web/*.local
+web/.env
+web/.env.*
+!web/.env.example
+npm-debug.log*
+yarn-error.log*
+.eslintcache
+web/coverage/
+web/.turbo/
+web/*.tsbuildinfo
+web/tsconfig.tsbuildinfo
+
+# trained models and their checkpoints - regenerable with
+# scripts/train_classifier.py, and hundreds of MB
+data/models/

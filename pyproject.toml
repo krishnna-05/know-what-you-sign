@@ -63,6 +63,9 @@ ocr = [
     "opencv-python-headless>=4.10",
     "pillow>=10.3",
 ]
+# The React interface in web/ is the front end; this extra is only the
+# now-superseded Streamlit prototype, kept until the React one has been
+# exercised properly. `serve` is what production needs.
 ui = [
     "streamlit>=1.37",
     "altair>=5.3",
@@ -94,6 +97,16 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency injection REQUIRES these in argument defaults - that is
+# how the framework reads the request. B008 is a genuine warning for mutable
+# defaults generally, but a false positive here.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query",
+    "fastapi.Body", "fastapi.Header", "fastapi.Path",
+    "File", "Form", "Depends", "Query", "Body", "Header",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

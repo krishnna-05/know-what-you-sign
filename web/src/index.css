@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* Tokens, defined once and redefined for dark mode rather than flipped
+   automatically: dark is a selected set of steps, not an inversion. Values are
+   the validated instance from the design system - the chart pair (context gray
+   vs yours red) separates at CVD delta-E 9.1 and both clear 3:1 on either
+   surface. */
+:root {
+  --surface:      #fcfcfb;
+  --surface-card: #ffffff;
+  --ink:          #0b0b0b;
+  --ink-2:        #52514e;
+  --ink-muted:    #898781;
+  --line:         #e1e0d9;
+  --accent:       #2a78d6;
+  --serious:      #8a6100;
+  --critical:     #b3261e;
+  --chart-ctx:    #898781;
+  --chart-yours:  #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface:      #16171a;
+    --surface-card: #1e2024;
+    --ink:          #ffffff;
+    --ink-2:        #c3c2b7;
+    --ink-muted:    #898781;
+    --line:         #2c2c2a;
+    --accent:       #7aa9e8;
+    --serious:      #e8c46a;
+    --critical:     #f2b8b5;
+    --chart-ctx:    #898781;
+    --chart-yours:  #d03b3b;
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface:      #16171a;
+  --surface-card: #1e2024;
+  --ink:          #ffffff;
+  --ink-2:        #c3c2b7;
+  --ink-muted:    #898781;
+  --line:         #2c2c2a;
+  --accent:       #7aa9e8;
+  --serious:      #e8c46a;
+  --critical:     #f2b8b5;
+  --chart-ctx:    #898781;
+  --chart-yours:  #d03b3b;
+}
+
+html { color-scheme: light dark; }
+
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-card: var(--surface-card);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--ink-muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+}
+
+/* Focus that is visible on either surface, for keyboard users. */
+:where(button, a, input, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

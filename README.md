@@ -54,7 +54,7 @@ The pipeline runs end to end. What works today:
 | Reference corpus from court judgments | working — 236 judgments harvested |
 | Scanned / photographed documents (OCR) | working, no system binary needed |
 | Dispute-venue distance | working — offline gazetteer, ~130 cities |
-| Semantic outlier detection | working, gated — and measurably unreliable (see below) |
+| Semantic outlier detection | **opt-in** (`--semantic`) — measurably unreliable, see below |
 | Consumer terms of service (2nd domain) | working, with expert ground truth |
 | Evaluation harness | working — `python scripts/evaluate.py` |
 | Trained unfair-clause detector | **macro-F1 0.739** on held-out test |
@@ -157,6 +157,16 @@ clauses:
 The indemnity pair is inverted. The likely cause is domain mismatch: LEDGAR
 indemnities are long verbose US commercial provisions, so a short plain Indian
 rental indemnity reads as unusual while a verbose abusive one reads as familiar.
+
+It is worse than one inverted pair. Scoring the fixture's *ordinary boilerplate*
+gives 87%, 88%, 93%, 95%, 95% — every clause at or near the 90% threshold.
+Indian rental clauses sit far from the US-commercial centroids across the board,
+so the percentile scale is shifted and the threshold would flag almost
+everything.
+
+**It is therefore off by default** and enabled with `--semantic`. It also costs
+about 15 seconds to load the embedding model, and charging every reader that for
+the least reliable signal is a bad trade — the default analysis runs in 0.15s.
 
 This is why the leg is gated behind an independent signal, weighted lowest, and
 reported separately. It is documented in full in `kwys/norms/semantic.py`

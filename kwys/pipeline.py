@@ -45,6 +45,7 @@ def analyse(
     norms_root: Path | str | None = None,
     corpus_version: str = "v1",
     show_low: bool = False,
+    semantic: bool = False,
 ) -> AnalysisResult:
     """Analyse one agreement."""
     from kwys.ingest.pdf_reader import read_pdf
@@ -229,24 +230,51 @@ def analyse(
     # harmful: an unusually generous clause is equally far out. It therefore
     # only surfaces on a clause that ALREADY carries an independent signal -
     # here, an obligation on the user with no counterpart on the other side.
-    from kwys.norms.semantic import SemanticNorms
+    #
+    # OFF BY DEFAULT, and measurement is why. Scoring the fixture's ordinary
+    # boilerplate against the LEDGAR centroids gives 87%, 88%, 93%, 95%, 95% -
+    # every one of them near or past the 90% threshold. Indian rental clauses
+    # sit far from US commercial ones across the board, so the percentile scale
+    # is shifted and the threshold flags almost everything. Combined with the
+    # inverted indemnity result in kwys/norms/semantic.py, this leg cannot be
+    # trusted on this domain, and it costs ~15s to load the embedding model.
+    # Charging every reader 15 seconds for the least reliable signal is a bad
+    # trade, so it is opt-in (`--semantic`) until centroids exist that are built
+    # from Indian consumer contracts.
+    #
+    # The candidate list is still built BEFORE the module is touched, and
+    # everything is scored in one batched call rather than one per clause.
+    gated: dict[str, str] = {}
+    already = {f.clause_id for f in findings}
+    for ob in obligations:
+        if ob.role is not role or ob.modality is Modality.RIGHT:
+            continue
+        if ob.clause_id in already:
+            continue
+        gated.setdefault(
+            ob.clause_id, f"It places an obligation on you ({ob.predicate[:60]})."
+        )
 
-    semantic = SemanticNorms.load(DATA_ROOT / "norms" / "semantic")
-    if not semantic.is_empty:
-        gated: dict[str, str] = {}
-        for ob in obligations:
-            if ob.role is role and ob.modality is not Modality.RIGHT:
-                gated.setdefault(
-                    ob.clause_id,
-                    f"It places an obligation on you ({ob.predicate[:60]}).",
-                )
-        already = {f.clause_id for f in findings}
-        for clause in clauses:
-            if clause.id in already or clause.id not in gated:
-                continue
-            if not clause.clause_type or clause.clause_type == "other":
-                continue
-            pct = semantic.outlier_percentile(clause.clause_type, clause.text)
+    candidates = (
+        [c for c in clauses if c.id in gated and c.clause_type and c.clause_type != "other"]
+        if semantic
+        else []
+    )
+
+    if candidates:
+        from kwys.norms.semantic import SemanticNorms
+
+        semantic = SemanticNorms.load(DATA_ROOT / "norms" / "semantic")
+        # Only types with a centroid can be scored; if none of the candidates
+        # has one, outlier_percentiles answers without loading the model.
+        scored_pcts = (
+            semantic.outlier_percentiles(
+                [(c.clause_type, c.text) for c in candidates]
+            )
+            if not semantic.is_empty
+            else [None] * len(candidates)
+        )
+        for clause, pct in zip(candidates, scored_pcts, strict=True):
             if pct is None:
                 continue
             finding = scorer.finding_from_semantic(clause, pct, gated[clause.id])

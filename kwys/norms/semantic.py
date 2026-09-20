@@ -136,13 +136,36 @@ class SemanticNorms:
         Returns None when there is no centroid for the type - which the caller
         must treat as "no information", never as "normal".
         """
-        centroid = self.centroids.get(clause_type)
-        if centroid is None:
-            return None
-        vec = embed([text])[0]
-        distance = 1.0 - float(vec @ centroid)
-        reference = self.distances[clause_type]
-        return float(np.searchsorted(reference, distance) / len(reference))
+        result = self.outlier_percentiles([(clause_type, text)])
+        return result[0]
+
+    def outlier_percentiles(
+        self, items: list[tuple[str, str]]
+    ) -> list[float | None]:
+        """Score several clauses in one pass.
+
+        The embedding model costs ~15s to load and milliseconds to run, so the
+        shape that matters is one batched call rather than one call per clause.
+        Clauses whose type has no centroid are answered without embedding
+        anything at all - and if NONE of them has a centroid, the model is never
+        loaded.
+        """
+        scorable = [
+            (i, ct, text)
+            for i, (ct, text) in enumerate(items)
+            if ct in self.centroids
+        ]
+        out: list[float | None] = [None] * len(items)
+        if not scorable:
+            return out
+
+        vectors = embed([text for _, _, text in scorable])
+        for (i, clause_type, _), vec in zip(scorable, vectors, strict=True):
+            centroid = self.centroids[clause_type]
+            distance = 1.0 - float(vec @ centroid)
+            reference = self.distances[clause_type]
+            out[i] = float(np.searchsorted(reference, distance) / len(reference))
+        return out
 
     def save(self, path: Path | str) -> Path:
         path = Path(path)

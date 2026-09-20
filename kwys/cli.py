@@ -48,6 +48,13 @@ def analyse(
         str, typer.Option(help="Which norm store to compare against.")
     ] = "v1",
     show_low: Annotated[bool, typer.Option(help="Include low-severity findings.")] = False,
+    semantic: Annotated[
+        bool,
+        typer.Option(
+            help="Also flag unusually WORDED clauses. Off by default: measured "
+            "unreliable on Indian contracts, and costs ~15s to load."
+        ),
+    ] = False,
     verbose: Annotated[bool, typer.Option("-v", "--verbose")] = False,
 ) -> None:
     """Check one agreement against the norms and report what stands out."""
@@ -67,6 +74,7 @@ def analyse(
         user_state=state,
         corpus_version=corpus_version,
         show_low=show_low,
+        semantic=semantic,
     )
     render_terminal(result, console)
 

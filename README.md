@@ -57,6 +57,7 @@ The pipeline runs end to end. What works today:
 | Semantic outlier detection | working, gated — and measurably unreliable (see below) |
 | Consumer terms of service (2nd domain) | working, with expert ground truth |
 | Evaluation harness | working — `python scripts/evaluate.py` |
+| Trained unfair-clause detector | **macro-F1 0.739** on held-out test |
 
 ### Three kinds of evidence, deliberately kept separate
 
@@ -84,11 +85,13 @@ people actually signed, and judgments are public record.
 
 `scripts/harvest_judgments.py` builds a corpus from them. Current state:
 
+Harvested from **642 judgments, 2,204 figures**:
+
 | field | n | median | p25–p75 | usable |
 |---|---|---|---|---|
-| `security_deposit.deposit_months` | 51 | 6 | 2 – 10.2 | yes |
-| `notice_period.notice_months` | 53 | 3 | 3 – 6 | yes |
-| `lock_in_period.lock_in_months` | 13 | 24 | — | no (needs 30) |
+| `security_deposit.deposit_months` | 287 | 6 months' rent | 3 – 10 | yes |
+| `notice_period.notice_months` | 382 | 3 months | 1 – 6 | yes |
+| `lock_in_period.lock_in_months` | 72 | 18 months | 11.75 – 24 | yes |
 
 **The bias, stated in the artefact and in every report built on it:** only *disputed*
 tenancies reach court, so this over-represents conflict-prone agreements and probably
@@ -120,6 +123,23 @@ kwys analyse terms.pdf --role consumer --domain consumer_tos
 Eight unfairness categories, rendered in language a non-expert can act on —
 "They can cut off your account, you cannot do the same to them", not
 "Unilateral termination".
+
+**Result on the held-out test split (1,607 clauses):**
+
+| system | macro-F1 | micro-F1 | precision | recall |
+|---|---|---|---|---|
+| rule baseline | 0.340 | 0.305 | 0.613 | 0.361 |
+| **trained** (Legal-BERT, 3 epochs, CPU) | **0.739** | 0.729 | 0.682 | **0.860** |
+
+Recall is the number that matters — a missed unfair clause is the failure that
+hurts the reader, while a false flag costs them a moment. The decision threshold
+is tuned on validation for recall, not for F1, which is why precision sits lower
+than it could.
+
+Per category, the model is near-perfect on the structurally distinctive ones
+(Jurisdiction 0.97, Choice of law 0.96) and weakest on the two with the least
+training data (Content removal 0.45 at n=13, Arbitration 0.52 at n=7). Macro-F1
+weights those small classes equally, which is why it sits below micro.
 
 ### A negative result worth reporting
 

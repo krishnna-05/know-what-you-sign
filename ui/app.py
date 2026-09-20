@@ -53,10 +53,19 @@ SEVERITY_STYLE = {
 
 
 def _available_versions(domain: Domain) -> list[str]:
+    """Built norm stores for this domain, REAL ONES FIRST.
+
+    Plain alphabetical sorting put "SYNTHETIC-DEMO" above "judgments-v1", so the
+    selector defaulted to invented numbers. The banner said so, but a default
+    that has to be read to be safe is the wrong default: anyone skimming would
+    take fabricated percentiles at face value. Synthetic corpora now sort last
+    and can never be the initial selection.
+    """
     root = DATA_ROOT / "norms"
     if not root.exists():
         return []
-    return sorted(p.name for p in root.iterdir() if (p / domain.value).is_dir())
+    names = [p.name for p in root.iterdir() if (p / domain.value).is_dir()]
+    return sorted(names, key=lambda n: ("SYNTHETIC" in n.upper(), n.lower()))
 
 
 def main() -> None:
@@ -225,11 +234,23 @@ def _render(result, domain: Domain, corpus_version: str) -> None:
     )
 
 
-def _distribution_chart(norms: NormStore, ev) -> None:
-    """Show where the user's value sits among comparable agreements.
+# Emphasis form: the reader's own value is the point, every other agreement is
+# context. Bars with a visible count, not the earlier histogram whose y-axis was
+# hidden - which left the bars meaning nothing at all. Gray is the de-emphasis
+# role rather than a failed categorical slot; the pair separates at CVD
+# delta-E 9.1 and both clear 3:1 on either surface.
+_CONTEXT_INK = "#898781"   # muted; identical in light and dark
+_YOURS_INK = "#d03b3b"     # status/critical, 4.68 light / 3.62 dark
 
-    The picture is the point. "96th percentile" is precise and inert; a marker
-    far out on the tail is immediately legible to someone with no training.
+
+def _distribution_chart(norms: NormStore, ev) -> None:
+    """Show where the reader's value sits among comparable agreements.
+
+    The picture is the point. "84th percentile" is precise and inert; one red bar
+    standing apart from the others is legible to someone with no training, which
+    is the entire audience for this tool. It is also more honest: the reader can
+    see that a fair number of agreements DO ask what theirs asks, which a single
+    percentile hides.
     """
     import altair as alt
     import pandas as pd
@@ -238,25 +259,71 @@ def _distribution_chart(norms: NormStore, ev) -> None:
     if norm is None or not norm.values:
         return
 
-    df = pd.DataFrame({"value": norm.values})
-    base = (
-        alt.Chart(df)
-        .mark_bar(opacity=0.75)
-        .encode(
-            x=alt.X("value:Q", bin=alt.Bin(maxbins=24), title="other agreements"),
-            y=alt.Y("count()", title=None, axis=None),
+    yours = float(ev.norm.value)
+    typical = float(norm.median)
+
+    counts = pd.Series(norm.values).value_counts().sort_index().reset_index()
+    counts.columns = ["value", "n"]
+    counts["mine"] = counts["value"].eq(yours)
+
+    # Headroom so the labels sit above the tallest bar instead of clipping it.
+    headroom = float(counts["n"].max()) * 1.20
+    lo, hi = float(counts["value"].min()), float(counts["value"].max())
+
+    bars = alt.Chart(counts).mark_bar(
+        size=14, cornerRadiusTopLeft=3, cornerRadiusTopRight=3
+    ).encode(
+        x=alt.X(
+            "value:Q",
+            scale=alt.Scale(nice=False, padding=26),
+            axis=alt.Axis(title=None, grid=False, tickCount=6,
+                          domainColor=_CONTEXT_INK, tickColor=_CONTEXT_INK,
+                          labelColor=_CONTEXT_INK, labelFontSize=11),
+        ),
+        y=alt.Y(
+            "n:Q",
+            scale=alt.Scale(domain=[0, headroom], nice=False),
+            axis=alt.Axis(title="agreements", grid=False, tickCount=3, domain=False,
+                          ticks=False, labelColor=_CONTEXT_INK,
+                          titleColor=_CONTEXT_INK, labelFontSize=10, titleFontSize=10),
+        ),
+        color=alt.condition(alt.datum.mine, alt.value(_YOURS_INK),
+                            alt.value(_CONTEXT_INK)),
+        tooltip=[alt.Tooltip("value:Q", title="value"),
+                 alt.Tooltip("n:Q", title="agreements")],
+    )
+
+    layers = [bars]
+    for value, label, ink, bold in (
+        (typical, f"usual: {typical:g}", _CONTEXT_INK, "normal"),
+        (yours, f"yours: {yours:g}", _YOURS_INK, "bold"),
+    ):
+        # Anchor an edge label inward so the plot bound cannot clip it. Direct
+        # labels rather than a legend: with two marks a legend costs more room
+        # than it explains, and a status colour must never carry meaning alone.
+        align = "right" if value >= hi else ("left" if value <= lo else "center")
+        layers.append(
+            alt.Chart(pd.DataFrame([{"v": value, "t": label}])).mark_text(
+                baseline="top", dy=2, fontSize=12, color=ink,
+                align=align, fontWeight=bold,
+            ).encode(x="v:Q", y=alt.value(0), text="t:N")
         )
+
+    st.altair_chart(
+        alt.layer(*layers).properties(height=140).configure_view(stroke=None),
+        use_container_width=True,
     )
-    marker = (
-        alt.Chart(pd.DataFrame({"value": [ev.norm.value]}))
-        .mark_rule(color="#b3261e", size=3)
-        .encode(x="value:Q")
-    )
-    st.altair_chart((base + marker).properties(height=110), use_container_width=True)
     st.caption(
-        f"Red line is your agreement · {norm.n} comparable agreements · "
-        f"most sit around {norm.median:g}"
+        f"Each bar is how many of {norm.n} comparable agreements asked that much "
+        f"\u00b7 {_share_sentence(ev.norm)}"
     )
+
+
+def _share_sentence(norm) -> str:
+    """Say the comparison in counts. "84th percentile" means nothing to most people."""
+    share = 1.0 - norm.percentile
+    in_hundred = max(1, round(share * 100))
+    return f"about {in_hundred} in 100 ask as much as yours"
 
 
 def _html(result) -> str:

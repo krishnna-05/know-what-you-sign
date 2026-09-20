@@ -98,3 +98,23 @@ def test_ui_role_map_covers_every_domain():
     assert not missing, f"the UI has no role options for: {missing}"
     for domain, options in ROLE_BY_DOMAIN.items():
         assert len(options) == 2, f"{domain} must offer both sides"
+
+
+def test_synthetic_corpus_is_never_the_default():
+    """Regression: the corpus selector sorted alphabetically, so SYNTHETIC-DEMO
+    came above judgments-v1 and the app opened on invented numbers. A warning
+    banner is not enough — a default that has to be read to be safe is the wrong
+    default, and someone skimming would take fabricated percentiles at face
+    value."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from ui.app import _available_versions
+
+    for domain in Domain:
+        versions = _available_versions(domain)
+        if len(versions) > 1:
+            assert "SYNTHETIC" not in versions[0].upper(), (
+                f"{domain.value} would open on synthetic data: {versions}"
+            )

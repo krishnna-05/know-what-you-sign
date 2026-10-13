@@ -1,0 +1,80 @@
+# Structural rules: findings that need no corpus, because the harm is plain on
+# the face of the clause.
+#
+# These are JUDGEMENT CALLS, written down so they can be read and argued with,
+# the same way direction_map.yaml declares which tail of a distribution hurts.
+# Each one names its threshold and why. They are not law; `basis` says what
+# each rests on, and where it cites a case, that citation is what a reader is
+# shown. Keep the list short: a rule here fires on every agreement, with no
+# corpus to temper it.
+
+version: 1
+
+# A figure past a fixed line. `field` is clause_type.field as in taxonomy.yaml.
+thresholds:
+
+  - field: entry_and_inspection.notice_hours
+    harms: [tenant]
+    flag_if: below
+    value: 24
+    severity: high
+    headline: "The owner can enter with little or no notice"
+    explain: >
+      This lets the owner come into your home with {value} notice. Agreements
+      normally require at least 24 hours' written notice, except in an
+      emergency.
+    question: "Ask for at least 24 hours' written notice before any visit, except in an emergency."
+    basis: "Rule of thumb: 24 hours' written notice is the common standard."
+
+  - field: deposit_refund.refund_days
+    harms: [tenant]
+    flag_if: above
+    value: 30
+    severity: medium
+    headline: "Your deposit comes back slowly"
+    explain: >
+      The owner has {value} to return your deposit after you move out. Refunds
+      are commonly due within a month, and the Model Tenancy Act 2021 provides
+      for refund when the owner takes the property back.
+    question: "Ask for the deposit to be returned within a month of handing over the keys."
+    basis: >
+      Rule of thumb: refunds are commonly due within a month. The Model Tenancy
+      Act 2021 s.11(2) provides for refund at handover, though it binds only
+      where adopted.
+
+  - field: penalty_and_late_fee.late_fee_pct
+    unit: pct_per_month      # only a monthly rate can be compared to this line
+    harms: [tenant]
+    flag_if: above
+    value: 2
+    severity: high
+    headline: "The late-payment charge is very high"
+    explain: >
+      A late charge of {value} works out to more than {annual} a year - far
+      above what a bank charges on an overdue loan.
+    question: "Ask for the late charge to be reduced to a modest rate, with a few days' grace."
+    basis: "Rule of thumb: above 2% a month (24% a year) exceeds typical overdue-loan rates."
+
+# Clauses whose problem is that they bind only one side.
+one_sided:
+
+  - clause_type: lock_in_period
+    domains: [residential_lease]
+    headline: "Only you are locked in"
+    explain: >
+      You cannot leave during the lock-in, but nothing stops the other side
+      ending the agreement early. A lock-in normally binds both parties.
+    question: "Ask for the lock-in to apply to both sides, or to be removed."
+
+# An arbitrator chosen by one side alone.
+unilateral_arbitrator:
+  severity: high
+  headline: "The other side picks the arbitrator"
+  explain: >
+    This agreement lets the {appointer} alone choose the arbitrator who would
+    decide any dispute with them. India's Supreme Court has held that a party
+    with an interest in the outcome cannot unilaterally appoint a sole
+    arbitrator (Perkins Eastern Architects v. HSCC, 2019), so this clause may
+    not hold up - but challenging it still costs time and money.
+  question: "Ask for the arbitrator to be appointed jointly, or by an independent institution."
+  basis: "Perkins Eastern Architects DPC v. HSCC (India) Ltd, Supreme Court of India, 2019."

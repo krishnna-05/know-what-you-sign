@@ -215,6 +215,10 @@ async def post_analyse(
             "pageCount": result.document.page_count,
             "warnings": result.warnings,
             "findings": [_finding_json(f) for f in result.findings],
+            "notChecked": [
+                {"clauseId": u.clause_id, "label": u.label, "value": u.value}
+                for u in result.unassessed
+            ],
             "distributions": _distributions(result, domain_enum),
         }
     )
@@ -266,6 +270,7 @@ def _finding_json(f) -> dict[str, Any]:
             "missingClause": ev.missing_clause,
             "venueDistanceKm": ev.venue_distance_km,
             "unfairTypes": ev.unfair_types,
+            "ruleBasis": ev.rule_basis,
         },
     }
 

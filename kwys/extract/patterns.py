@@ -233,7 +233,11 @@ def extract_dispute(text: str) -> list[Term]:
         out.append(_term("seat_city", m.group(1).strip(" .,"), None, m.group(0).strip(), 0.8))
     if _find(r"sole\s+arbitrator", text):
         out.append(_term("arbitrators_count", 1.0, "count", "sole arbitrator"))
-    m = _find(r"arbitrator\s+appointed\s+by\s+the\s+(\w+)", text)
+    m = _find(
+        r"arbitrator\s+(?:to\s+be\s+)?(?:appointed|nominated|chosen|selected)\s+"
+        r"(?:solely\s+|only\s+)?by\s+the\s+(\w+)",
+        text,
+    )
     if m:
         out.append(_term("appointed_by", m.group(1).strip(), None, m.group(0).strip(), 0.85))
     return out
@@ -256,6 +260,36 @@ def extract_jurisdiction(text: str) -> list[Term]:
     return out
 
 
+def _months_of(text: str) -> tuple[float, str] | None:
+    """A duration in months, from whichever unit the clause uses."""
+    for unit, words in (("months", _MONTH_WORDS), ("years", _YEAR_WORDS), ("days", _DAY_WORDS)):
+        d = _duration(text, words)
+        if d:
+            return _to_months(d[0], unit), d[1]
+    return None
+
+
+def extract_noncompete(text: str) -> list[Term]:
+    d = _months_of(text)
+    return [_term("noncompete_months", d[0], "months", d[1])] if d else []
+
+
+def extract_probation(text: str) -> list[Term]:
+    d = _months_of(text)
+    return [_term("probation_months", d[0], "months", d[1])] if d else []
+
+
+def extract_bond(text: str) -> list[Term]:
+    out: list[Term] = []
+    d = _months_of(text)
+    if d:
+        out.append(_term("bond_months", d[0], "months", d[1]))
+    money = _money(text)
+    if money:
+        out.append(_term("bond_amount_inr", money[0], "INR", money[1]))
+    return out
+
+
 EXTRACTORS = {
     "security_deposit": extract_deposit,
     "deposit_refund": extract_refund,
@@ -268,6 +302,9 @@ EXTRACTORS = {
     "entry_and_inspection": extract_entry,
     "dispute_resolution": extract_dispute,
     "governing_law": extract_jurisdiction,
+    "non_compete": extract_noncompete,
+    "probation": extract_probation,
+    "bond_and_recovery": extract_bond,
 }
 
 

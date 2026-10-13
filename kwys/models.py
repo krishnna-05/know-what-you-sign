@@ -198,6 +198,8 @@ class Evidence(BaseModel):
     unfair_types: list[str] = Field(default_factory=list)  # LexGLUE unfair_tos labels
     semantic_outlier: float | None = None  # percentile of distance from centroid
     venue_distance_km: float | None = None  # measured, not compared to a corpus
+    # A declared rule from config/structural_rules.yaml, by what it rests on.
+    rule_basis: str | None = None
 
     @model_validator(mode="after")
     def _must_carry_something(self) -> Evidence:
@@ -215,6 +217,9 @@ class Evidence(BaseModel):
             # evidence in its own right, and a stronger kind than most here:
             # the label set was defined by lawyers, not by us.
             bool(self.unfair_types),
+            # A rule written down in config, with its threshold and its reason,
+            # for harms plain on the face of a clause.
+            self.rule_basis is not None,
         )
         if not any(grounds):
             raise ValueError(
@@ -238,6 +243,18 @@ class Finding(BaseModel):
     evidence: Evidence  # required, by design
 
 
+class UnassessedTerm(BaseModel):
+    """A term that was found but could not be judged either way.
+
+    Listed so that silence is not mistaken for "fine": with no reference data,
+    no statutory anchor and no rule, the report has nothing to say about it.
+    """
+
+    clause_id: str
+    label: str  # "Rent and annual increase"
+    value: str  # "15 % a year", as the reader should see it
+
+
 class AnalysisResult(BaseModel):
     document: Document
     findings: list[Finding] = Field(default_factory=list)
@@ -245,6 +262,7 @@ class AnalysisResult(BaseModel):
     corpus_version: str | None = None
     generated_at: datetime = Field(default_factory=datetime.now)
     warnings: list[str] = Field(default_factory=list)
+    unassessed: list[UnassessedTerm] = Field(default_factory=list)
 
     def by_severity(self, s: Severity) -> list[Finding]:
         return [f for f in self.findings if f.severity is s]

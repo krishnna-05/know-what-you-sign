@@ -119,6 +119,7 @@ RULES: dict[str, list[Rule]] = {
         (r"\bbond\b", 3.5), (r"service\s+agreement\s+period", 2.5),
         (r"training\s+cost", 3.0), (r"recover(?:y|ed)?\s+(?:of\s+)?(?:the\s+)?(?:sum|amount)", 2.0),
         (r"liquidated\s+damages", 2.0),
+        (r"serve\s+the\s+(?:company|employer)\s+for\s+(?:a\s+)?(?:minimum\s+)?(?:period)?", 3.0),
     ],
     "probation": [
         (r"probation(?:ary)?", 4.0),

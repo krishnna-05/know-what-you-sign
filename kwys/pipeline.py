@@ -29,7 +29,15 @@ from kwys.extract.patterns import (
     derive_deposit_months,
     extract_terms,
 )
-from kwys.models import AnalysisResult, Document, Domain, Modality, Role, Severity
+from kwys.models import (
+    AnalysisResult,
+    Document,
+    Domain,
+    Modality,
+    Role,
+    Severity,
+    UnassessedTerm,
+)
 from kwys.norms.store import NormStore, default_version, is_synthetic
 from kwys.score.scorer import Scorer
 from kwys.segment.segmenter import segment
@@ -162,6 +170,7 @@ def analyse(
         clause_terms.append((clause, extract_terms(clause.clause_type, clause.text)))
 
     _derive_deposit_months(clause_terms)
+    unassessed: list[tuple] = []
 
     for clause, terms in clause_terms:
         # Some fields belong to a PARTY, not to the agreement. A notice period
@@ -177,9 +186,20 @@ def analyse(
             if term.field in PAIRED_FIELDS and bound is not None and bound is not role:
                 continue
             scored = scorer.score_term(clause.clause_type, term)
-            finding = scorer.finding_from_term(clause, scored)
+            # The corpus first; then the law, which needs no corpus; then a
+            # declared rule of thumb. The first that has something to say wins,
+            # so one term never produces two findings.
+            finding = (
+                scorer.finding_from_term(clause, scored)
+                or scorer.finding_from_anchor(clause, term)
+                or scorer.finding_from_threshold(clause, term)
+            )
             if finding:
                 findings.append(finding)
+            elif _is_judgeable(clause.clause_type, term, role) and not scorer.has_reference(
+                clause.clause_type, term
+            ):
+                unassessed.append((clause, term))
 
     # --- venue distance -----------------------------------------------------
     # Needs no corpus: the harm is arithmetic, not statistical.
@@ -227,6 +247,25 @@ def analyse(
     # Paired comparison first: "you give 6 months, they give 15 days" is a
     # stronger and more actionable finding than "no mirror clause found", and
     # both would otherwise fire on the same provision.
+    # Clauses that bind only the reader where they normally bind both, and a
+    # sole arbitrator chosen by the other side. Declared in
+    # config/structural_rules.yaml; neither needs a corpus.
+    rule_clause_ids: set[str] = set()
+    for clause, rule in _one_sided_clauses(clause_terms, pmap, role, domain):
+        rule_clause_ids.add(clause.id)
+        findings.append(scorer.finding_from_one_sided(clause, rule))
+    for clause, appointer in _unilateral_arbitrators(clause_terms, pmap, role):
+        rule_clause_ids.add(clause.id)
+        findings.append(scorer.finding_from_arbitrator(clause, appointer))
+
+    # A clause already flagged by a law or a declared rule has a specific
+    # finding; "this obligation runs only one way" about it adds only noise.
+    rule_clause_ids.update(
+        f.clause_id
+        for f in findings
+        if f.evidence.rule_basis or (f.evidence.anchor and f.evidence.norm is None)
+    )
+
     paired_clause_ids = set()
     for clause_id, detail, extra in find_paired_asymmetries(clause_terms, pmap, role):
         clause = by_id.get(clause_id)
@@ -235,8 +274,8 @@ def analyse(
             findings.append(scorer.finding_from_paired(clause, detail, extra))
 
     for clause_id, detail in find_asymmetries(clauses, obligations, pmap, role):
-        if clause_id in paired_clause_ids:
-            continue  # already reported, with numbers attached
+        if clause_id in paired_clause_ids or clause_id in rule_clause_ids:
+            continue  # already reported, more specifically
         clause = by_id.get(clause_id)
         if clause:
             findings.append(scorer.finding_from_asymmetry(clause, detail))
@@ -315,13 +354,65 @@ def analyse(
             + ", ".join(pmap.unresolved[:4])
         )
 
+    # Terms nothing could judge, on clauses that drew no finding at all.
+    # Listed so that a quiet report is not read as a clean one.
+    flagged = {f.clause_id for f in findings}
+    not_checked = [
+        UnassessedTerm(
+            clause_id=clause.id,
+            label=C.display_name(clause.clause_type),
+            value=Scorer._fmt(float(term.value), term.unit),
+        )
+        for clause, term in unassessed
+        if clause.id not in flagged
+    ]
+
     return AnalysisResult(
         document=document,
         findings=findings,
         clauses_checked=len([c for c in clauses if c.id != "preamble"]),
         corpus_version=corpus_version if not norms.is_empty else None,
         warnings=warnings,
+        unassessed=not_checked,
     )
+
+
+def _is_judgeable(clause_type: str, term, role: Role) -> bool:
+    """A numeric term someone has declared a harmful direction for.
+
+    Monthly rent has no direction - it is a price, not a term - so its absence
+    from the report is not a gap worth mentioning.
+    """
+    if not isinstance(term.value, (int, float)) or isinstance(term.value, bool):
+        return False
+    return C.direction_for(f"{clause_type}.{term.field}", role) is not None
+
+
+def _one_sided_clauses(clause_terms, pmap, role: Role, domain: Domain):
+    """Clauses of a type that should bind both sides, binding only the reader."""
+    for rule in C.structural_rules().get("one_sided", []):
+        if domain.value not in rule.get("domains", [domain.value]):
+            continue
+        of_type = [c for c, _ in clause_terms if c.clause_type == rule["clause_type"]]
+        bound = {c.id: attribute_clause_to_party(c, pmap) for c in of_type}
+        if any(b is not None and b is not role for b in bound.values()):
+            continue  # the other side is bound somewhere too
+        for clause in of_type:
+            if bound[clause.id] is role:
+                yield clause, rule
+                break
+
+
+def _unilateral_arbitrators(clause_terms, pmap, role: Role):
+    """A sole arbitrator appointed by the other side alone."""
+    for clause, terms in clause_terms:
+        for term in terms:
+            if term.field != "appointed_by":
+                continue
+            appointer = pmap.resolve(str(term.value))
+            if appointer is not None and appointer is not role:
+                yield clause, str(term.value)
+                break
 
 
 def _derive_deposit_months(clause_terms: list[tuple]) -> None:

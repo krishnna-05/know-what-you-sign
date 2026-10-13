@@ -60,6 +60,8 @@ export interface Evidence {
   missingClause: boolean;
   venueDistanceKm: number | null;
   unfairTypes: string[];
+  /** Set when the finding comes from a declared rule rather than data. */
+  ruleBasis?: string | null;
 }
 
 export interface Finding {
@@ -84,5 +86,7 @@ export interface AnalysisResult {
   pageCount: number;
   warnings: string[];
   findings: Finding[];
+  /** Terms found but judged by nothing: no data, no law, no rule. */
+  notChecked?: { clauseId: string; label: string; value: string }[];
   distributions: Record<string, Distribution>;
 }

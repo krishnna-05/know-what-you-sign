@@ -96,6 +96,17 @@ def render_terminal(result: AnalysisResult, console: Console) -> None:
             console.print(table)
         if ev.anchor and ev.anchor.exceeded:
             console.print(f"   [dim]law: {ev.anchor.source}[/dim]")
+        if ev.rule_basis:
+            console.print(f"   [dim]based on: {' '.join(ev.rule_basis.split())}[/dim]")
+        console.print()
+
+    if result.unassessed:
+        console.print(
+            "[bold]Found, but not checked[/bold] [dim]- no comparison data, law "
+            "or rule yet; read these yourself:[/dim]"
+        )
+        for u in result.unassessed:
+            console.print(f"   {u.label}: {u.value} [dim](clause {u.clause_id})[/dim]")
         console.print()
 
     console.print(f"[dim]{DISCLAIMER}[/dim]")
@@ -109,6 +120,18 @@ def render_html(result: AnalysisResult) -> str:
     for i, f in enumerate(result.findings, start=1):
         rows.append(_finding_html(i, f))
 
+    unassessed_block = (
+        '<div class="warn"><strong>Found, but not checked</strong> - no comparison '
+        "data, law or rule yet; read these yourself:<ul>"
+        + "".join(
+            f"<li>{html.escape(u.label)}: {html.escape(u.value)} "
+            f"(clause {html.escape(u.clause_id)})</li>"
+            for u in result.unassessed
+        )
+        + "</ul></div>"
+        if result.unassessed
+        else ""
+    )
     warnings_html = "".join(
         f'<li>{html.escape(w)}</li>' for w in result.warnings
     )
@@ -173,6 +196,7 @@ def render_html(result: AnalysisResult) -> str:
     &middot; you are the {doc.user_role.value}</div>
   {warnings_block}
   {"".join(rows) or empty_note}
+  {unassessed_block}
   <footer>{html.escape(DISCLAIMER)}</footer>
 </main>
 """

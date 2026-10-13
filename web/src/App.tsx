@@ -116,6 +116,25 @@ export default function App() {
               ))
             )}
 
+            {(result.notChecked?.length ?? 0) > 0 && (
+              <div className="border border-line rounded-xl p-5 mt-6">
+                <p className="m-0 font-medium">Found, but not checked</p>
+                <p className="text-sm text-muted mt-1 mb-3">
+                  There is no comparison data, law or rule for these yet, so
+                  this report cannot say whether they are fair. Read them
+                  yourself.
+                </p>
+                <ul className="m-0 pl-5 text-sm text-ink-2">
+                  {result.notChecked!.map((u) => (
+                    <li key={`${u.clauseId}-${u.label}`}>
+                      {u.label}: {u.value}{" "}
+                      <span className="text-muted">(clause {u.clauseId})</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <p className="text-xs text-muted border-t border-line pt-5 mt-8">
               {DISCLAIMER}
             </p>

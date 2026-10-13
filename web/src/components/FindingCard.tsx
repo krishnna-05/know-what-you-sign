@@ -132,6 +132,7 @@ export function FindingCard({
               )}
             </Row>
           )}
+          {ev.ruleBasis && <Row label="Based on">{ev.ruleBasis}</Row>}
           {ev.directionRationale && (
             <Row label="Why this direction">{ev.directionRationale}</Row>
           )}

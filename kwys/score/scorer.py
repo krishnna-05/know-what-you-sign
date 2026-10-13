@@ -50,6 +50,19 @@ VENUE_NEARBY_KM = 60.0
 SEMANTIC_OUTLIER_PERCENTILE = 0.90
 
 
+def _indian_grouping(value: float) -> str:
+    """3,00,000 rather than 300,000: how the reader's own agreement writes it."""
+    digits = str(int(round(value)))
+    if len(digits) <= 3:
+        return digits
+    head, tail = digits[:-3], digits[-3:]
+    groups = []
+    while len(head) > 2:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    return ",".join([head, *groups, tail]) if head else ",".join([*groups, tail])
+
+
 def _load_weights() -> dict[str, Any]:
     with _WEIGHTS_PATH.open() as fh:
         return yaml.safe_load(fh)
@@ -388,6 +401,155 @@ class Scorer:
             evidence=evidence,
         )
 
+    # ---------------------------------------------------------------- no corpus
+    #
+    # Findings that need no reference data. Without these, a term with no
+    # corpus behind it was silently dropped, and a harsh agreement could come
+    # back looking nearly clean - the more dangerous failure for this tool.
+
+    def _anchor_variant(self) -> str:
+        return "residential" if self.domain is Domain.RESIDENTIAL_LEASE else "all"
+
+    def _harms(self, field_key: str, comparison: str) -> tuple[bool, str | None]:
+        """Whether breaching a ceiling (or floor) hurts this reader, and why."""
+        entry = C.direction_for(field_key, self.role)
+        if entry is None:
+            return False, None
+        direction, rationale = entry
+        return (direction > 0) == (comparison == "max"), rationale
+
+    def has_reference(self, clause_type: str, term: Term) -> bool:
+        """Whether anything at all can judge this term: data, law or a rule."""
+        field_key = f"{clause_type}.{term.field}"
+        norm = self.norms.get(field_key)
+        if norm is not None and norm.sufficient:
+            return True
+        if C.statutory_anchor(field_key, 0.0, self._anchor_variant()) is not None:
+            return True
+        return C.threshold_rule(field_key, term.unit, self.role) is not None
+
+    def finding_from_anchor(self, clause: Clause, term: Term) -> Finding | None:
+        """A term past a statutory line that BINDS here, with or without a corpus.
+
+        Only a binding instrument stands alone. A model law the reader's state
+        has not adopted still appears as context on a deviation finding, but on
+        its own it would flag every refund window in every non-adopting state -
+        "30 days" included - which is noise. A declared rule of thumb in
+        structural_rules.yaml covers the clearly excessive cases instead.
+        """
+        if not isinstance(term.value, (int, float)) or isinstance(term.value, bool):
+            return None
+        clause_type = clause.clause_type or "other"
+        field_key = f"{clause_type}.{term.field}"
+        anchor = C.statutory_anchor(
+            field_key, float(term.value), self._anchor_variant(), self.user_state
+        )
+        if anchor is None or not anchor.exceeded or not anchor.applies:
+            return None
+        harms, rationale = self._harms(field_key, anchor.comparison)
+        if not harms:
+            return None
+
+        score = 0.8
+        yours = self._fmt(float(term.value), term.unit)
+        return Finding(
+            clause_id=clause.id,
+            severity=self._severity(score),
+            score=score,
+            headline=f"{C.display_name(clause_type)}: {yours}",
+            plain_language=f"Yours is {yours}. {self._anchor_sentence(anchor)}",
+            question_to_ask=(
+                f"Ask for the {C.display_name(clause_type).lower()} to be brought "
+                f"in line with {anchor.source.split(',')[0]}."
+            ),
+            evidence=Evidence(
+                clause_id=clause.id,
+                clause_type=clause_type,
+                clause_text=clause.text,
+                field=field_key,
+                term=term,
+                anchor=anchor,
+                direction_rationale=rationale,
+            ),
+        )
+
+    def finding_from_threshold(self, clause: Clause, term: Term) -> Finding | None:
+        """A term past a declared rule-of-thumb line in structural_rules.yaml."""
+        if not isinstance(term.value, (int, float)) or isinstance(term.value, bool):
+            return None
+        clause_type = clause.clause_type or "other"
+        field_key = f"{clause_type}.{term.field}"
+        rule = C.threshold_rule(field_key, term.unit, self.role)
+        if rule is None:
+            return None
+        value = float(term.value)
+        line = float(rule["value"])
+        if not (value < line if rule["flag_if"] == "below" else value > line):
+            return None
+
+        if term.unit == "hours":
+            shown = "no" if value == 0 else f"only {self._fmt(value, term.unit)}'"
+        else:
+            shown = self._fmt(value, term.unit)
+        annual = f"{value * 12:g}%" if term.unit == "pct_per_month" else ""
+        score = 0.8 if rule["severity"] == "high" else 0.55
+        return Finding(
+            clause_id=clause.id,
+            severity=self._severity(score),
+            score=score,
+            headline=rule["headline"],
+            plain_language=" ".join(
+                rule["explain"].format(value=shown, annual=annual).split()
+            ),
+            question_to_ask=rule["question"],
+            evidence=Evidence(
+                clause_id=clause.id,
+                clause_type=clause_type,
+                clause_text=clause.text,
+                field=field_key,
+                term=term,
+                rule_basis=rule["basis"],
+            ),
+        )
+
+    def finding_from_one_sided(self, clause: Clause, rule: dict) -> Finding:
+        """A clause that binds only the reader, where it normally binds both."""
+        score = 0.6
+        return Finding(
+            clause_id=clause.id,
+            severity=self._severity(score),
+            score=score,
+            headline=rule["headline"],
+            plain_language=" ".join(rule["explain"].split()),
+            question_to_ask=rule["question"],
+            evidence=Evidence(
+                clause_id=clause.id,
+                clause_type=clause.clause_type or "other",
+                clause_text=clause.text,
+                asymmetry=True,
+                asymmetry_detail=f"The {clause.clause_type} binds only you.",
+            ),
+        )
+
+    def finding_from_arbitrator(self, clause: Clause, appointer: str) -> Finding:
+        """A sole arbitrator chosen by the other side alone."""
+        rule = C.structural_rules()["unilateral_arbitrator"]
+        score = 0.8 if rule["severity"] == "high" else 0.55
+        return Finding(
+            clause_id=clause.id,
+            severity=self._severity(score),
+            score=score,
+            headline=rule["headline"],
+            plain_language=" ".join(rule["explain"].format(appointer=appointer).split()),
+            question_to_ask=rule["question"],
+            evidence=Evidence(
+                clause_id=clause.id,
+                clause_type=clause.clause_type or "other",
+                clause_text=clause.text,
+                rule_basis=rule["basis"],
+            ),
+        )
+
     # ---------------------------------------------------------------- language
 
     def _severity(self, score: float) -> Severity:
@@ -408,7 +570,11 @@ class Scorer:
             "pct_per_year": "% a year",
             "pct_per_month": "% a month",
         }
+        if unit == "INR":
+            return f"Rs. {_indian_grouping(value)}"
         name = unit_names.get(unit or "", unit or "")
+        if name.startswith("%"):
+            return f"{value:g}{name}"  # "5% a month", not "5 % a month"
         if value == int(value):
             return f"{int(value)} {name}".strip()
         return f"{value:g} {name}".strip()
@@ -444,8 +610,7 @@ class Scorer:
             parts.append(self._anchor_sentence(anchor))
         return " ".join(parts)
 
-    @staticmethod
-    def _anchor_sentence(anchor) -> str:
+    def _anchor_sentence(self, anchor) -> str:
         """Phrase a statutory reference according to whether it actually binds.
 
         The Model Tenancy Act is a MODEL law: it binds nobody until a state
@@ -455,9 +620,16 @@ class Scorer:
         is still a useful reference point, so it is shown either way - with
         different words.
         """
-        note = (anchor.note or "").strip()
+        note = " ".join((anchor.note or "").split())
         if anchor.applies:
             return f"{note} ({anchor.source})".strip()
+        if self.user_state is None:
+            # Not "your state has not adopted it": we were not told the state.
+            return (
+                f"{note} This is a model law that binds only in states that have "
+                f"adopted it, so it is a reference point unless yours has. "
+                f"({anchor.source})"
+            ).strip()
         return (
             f"{note} This is a model law that your state has not adopted, so it "
             f"is a reference point rather than a rule that binds here. "

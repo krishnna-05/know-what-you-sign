@@ -79,6 +79,11 @@ anchors:
         and is an interpretation of the Act's wording, not a figure the Act
         contains — the report must therefore phrase this as "the Act provides
         for refund at handover", never as "the Act allows 0 days".
+      # What the reader sees; `note` above is for whoever maintains this file.
+      reader_note: >
+        The Model Tenancy Act 2021 provides for the deposit to be refunded when
+        the landlord takes back vacant possession, after due deductions - not
+        weeks or months later.
       quote: >
         "The security deposit will be refunded by the landlord to the tenant at
         the time of taking over vacant possession of the premises, after making
@@ -106,6 +111,12 @@ anchors:
         unenforceable as written.
         Phrase the finding as "commonly unenforceable in India", never as
         "void" — enforceability is fact-specific and this tool does not decide it.
+      reader_note: >
+        Section 27 of the Indian Contract Act makes agreements in restraint of
+        trade void to that extent, and Indian courts have generally declined to
+        enforce non-compete restrictions that apply after employment ends. Such
+        a clause is commonly unenforceable in India, though that turns on the
+        facts.
       quote: >
         "27. Agreement in restraint of trade, void.— Every agreement by which
         any one is restrained from exercising a lawful profession, trade or

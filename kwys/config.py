@@ -73,6 +73,23 @@ def direction_map() -> dict[str, Any]:
     return _load("direction_map.yaml")["fields"]
 
 
+@lru_cache(maxsize=1)
+def structural_rules() -> dict[str, Any]:
+    """Corpus-free rules: thresholds, one-sided clauses, unilateral arbitrators."""
+    return _load("structural_rules.yaml")
+
+
+def threshold_rule(field_key: str, unit: str | None, role: Role) -> dict[str, Any] | None:
+    """The threshold rule for this field, if one exists and it protects `role`."""
+    for rule in structural_rules().get("thresholds", []):
+        if rule["field"] != field_key or role.value not in rule["harms"]:
+            continue
+        if rule.get("unit") and rule["unit"] != unit:
+            continue  # "2% a month" says nothing about a rate of unknown period
+        return rule
+    return None
+
+
 def direction_for(field_key: str, role: Role) -> tuple[int, str] | None:
     """Return (+1|-1, rationale) for a field/role pair, or None if undeclared.
 
@@ -166,7 +183,8 @@ def statutory_anchor(
         comparison=comparison,
         unit=spec["unit"],
         source=spec["source"],
-        note=spec.get("note"),
+        # `reader_note` where present: `note` may carry maintainer instructions.
+        note=spec.get("reader_note") or spec.get("note"),
         exceeded=exceeded,
         applies=applies,
     )
@@ -186,7 +204,7 @@ def unverified_anchors() -> list[str]:
 
 
 def validate_all() -> list[str]:
-    """Cross-check the three files against each other. Returns problems found."""
+    """Cross-check the config files against each other. Returns problems found."""
     problems: list[str] = []
 
     tax = taxonomy()
@@ -210,5 +228,21 @@ def validate_all() -> list[str]:
         ct = field_key.split(".")[0]
         if ct not in known_types:
             problems.append(f"statutory_anchors: unknown clause type {ct!r} in {field_key!r}")
+
+    # A misspelt field or role here would not fail: the rule would just never
+    # fire, which is the silent kind of wrong.
+    rules = structural_rules()
+    for rule in rules.get("thresholds", []):
+        ct, _, name = rule["field"].partition(".")
+        if name not in (tax["clause_types"].get(ct, {}).get("fields") or {}):
+            problems.append(f"structural_rules: unknown field {rule['field']!r}")
+        for role in rule["harms"]:
+            if role not in {r.value for r in Role}:
+                problems.append(f"structural_rules: {rule['field']}: unknown role {role!r}")
+        if rule["flag_if"] not in ("above", "below"):
+            problems.append(f"structural_rules: {rule['field']}: flag_if must be above/below")
+    for rule in rules.get("one_sided", []):
+        if rule["clause_type"] not in known_types:
+            problems.append(f"structural_rules: unknown clause type {rule['clause_type']!r}")
 
     return problems

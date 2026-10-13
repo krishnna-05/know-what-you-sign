@@ -175,3 +175,84 @@ def test_job_offer_flags_the_notice_imbalance(pdfs, norms_root):
         pdfs, norms_root, "07_job_offer_with_bond", Role.EMPLOYEE, Domain.EMPLOYMENT_OFFER
     )
     assert any(f.evidence.asymmetry for f in result.findings)
+
+
+# ---------------------------------------------------------------- no-corpus rules
+#
+# A harsh lease once came back with two findings, because every term without
+# comparison data was dropped in silence. These pin the four corpus-free legs:
+# binding law, a unilateral arbitrator, declared thresholds, and the list of
+# what could not be judged at all.
+
+
+def _by_clause(result) -> dict[str, list]:
+    out: dict[str, list] = {}
+    for f in result.findings:
+        out.setdefault(f.clause_id, []).append(f)
+    return out
+
+
+def test_harsh_lease_flags_its_rule_breaches_for_the_tenant(pdfs, norms_root):
+    found = _by_clause(_run(pdfs, norms_root, "01_lease_harsh_on_tenant", Role.TENANT))
+
+    assert "Perkins Eastern" in found["5.1"][0].evidence.rule_basis  # arbitrator
+    assert found["3.2"][0].headline.startswith("The owner can enter")  # entry, no notice
+    assert found["2.5"][0].evidence.rule_basis  # 5% a month late fee
+    assert found["2.3"][0].evidence.rule_basis  # 120-day refund
+    assert found["1.2"][0].headline == "Only you are locked in"
+    # One finding per clause: the late fee is not also "runs only one way".
+    assert all(len(v) == 1 for v in found.values()), found
+
+
+def test_rules_protect_only_the_side_they_name(pdfs, norms_root):
+    """The landlord chose the arbitrator and gains from entry without notice."""
+    result = _run(pdfs, norms_root, "01_lease_harsh_on_tenant", Role.LANDLORD)
+    assert not any(f.evidence.rule_basis for f in result.findings)
+    assert "1.2" not in _ids(result)
+
+
+def test_unjudgeable_terms_are_listed_not_dropped(pdfs, norms_root):
+    result = _run(pdfs, norms_root, "01_lease_harsh_on_tenant", Role.TENANT)
+    listed = {(u.clause_id, u.value) for u in result.unassessed}
+    assert ("2.4", "15% a year") in listed  # rent rise: no data, law or rule
+    flagged = _ids(result)
+    assert not any(u.clause_id in flagged for u in result.unassessed)
+
+
+def test_binding_law_stands_alone_where_it_applies(pdfs, norms_root):
+    """In Assam the Model Tenancy Act binds, so the refund rule gives way to it."""
+    result = analyse(
+        str(pdfs["01_lease_harsh_on_tenant"]), role=Role.TENANT, domain=LEASE,
+        norms_root=norms_root, corpus_version="test", user_state="Assam",
+    )
+    refund = _by_clause(result)["2.3"][0]
+    assert refund.evidence.anchor is not None and refund.evidence.anchor.applies
+
+
+def test_a_model_law_alone_does_not_flag_an_ordinary_refund(pdfs, norms_root):
+    """Outside adopting states, "refund at handover" would flag every refund
+    window - 30 days included. The fair lease must stay quiet."""
+    result = analyse(
+        str(pdfs["02_lease_fair"]), role=Role.TENANT, domain=LEASE,
+        norms_root=norms_root, corpus_version="test", user_state="Karnataka",
+    )
+    assert result.findings == []
+
+
+def test_job_offer_flags_the_non_compete_under_section_27(pdfs, norms_root):
+    result = _run(
+        pdfs, norms_root, "07_job_offer_with_bond", Role.EMPLOYEE, Domain.EMPLOYMENT_OFFER
+    )
+    noncompete = _by_clause(result)["4.1"][0]
+    assert "s.27" in noncompete.evidence.anchor.source
+    assert "commonly unenforceable" in noncompete.plain_language
+    # The bond has no reference yet, and says so rather than vanishing.
+    assert any(u.label.startswith("Service bond") for u in result.unassessed)
+
+
+def test_figures_read_as_the_agreement_writes_them():
+    from kwys.score.scorer import Scorer
+
+    assert Scorer._fmt(300_000, "INR") == "Rs. 3,00,000"
+    assert Scorer._fmt(1_92_00_000, "INR") == "Rs. 1,92,00,000"
+    assert Scorer._fmt(5, "pct_per_month") == "5% a month"

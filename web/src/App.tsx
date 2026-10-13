@@ -35,7 +35,7 @@ export default function App() {
     setError(null);
     setResult(null);
     try {
-      setResult(await analyse({ ...state, city: state.city, state: state.state }));
+      setResult(await analyse(state));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -75,6 +75,14 @@ export default function App() {
               <Stat value={high} label="need attention" />
               <Stat value={medium} label="worth a look" />
             </div>
+
+            <p className="text-xs text-muted -mt-3 mb-5">
+              {result.pageCount} page{result.pageCount === 1 ? "" : "s"}
+              {result.wasOcred &&
+                " · read from a scan, so check each quoted figure against your copy"}
+              {result.corpusLabel &&
+                ` · compared against ${result.corpusLabel.toLowerCase()}`}
+            </p>
 
             {result.warnings.map((w) => (
               <p
@@ -122,9 +130,20 @@ export default function App() {
               agreements. A term far outside that range is objectively unusual,
               and every flag shows the evidence behind it.
             </p>
-            <p className="m-0">
+            <p className="mb-1">
               It does not decide whether a clause is legal or enforceable, and
               it is not a substitute for a lawyer.
+            </p>
+            <p className="m-0">
+              Clauses are recognised by{" "}
+              {config.capabilities.clauseClassifier === "trained"
+                ? "a trained model"
+                : "keyword rules"}
+              ; unfair terms-of-service clauses by{" "}
+              {config.capabilities.unfairDetector === "trained"
+                ? "a model trained on expert annotations"
+                : "keyword rules, which miss a good share of what an expert would flag"}
+              .
             </p>
           </aside>
         )}

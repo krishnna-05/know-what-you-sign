@@ -83,14 +83,6 @@ class PartyMap:
             return next(iter(hits))
         return None
 
-    def mentions(self, text: str) -> set[Role]:
-        lowered = text.lower()
-        return {
-            role
-            for label, role in self.label_to_role.items()
-            if re.search(rf"\b{re.escape(label)}\b", lowered)
-        }
-
     @property
     def counterparty_of(self) -> dict[Role, Role]:
         a, b = DOMAIN_ROLES[self.domain]

@@ -121,12 +121,37 @@ def extract_deposit(text: str) -> list[Term]:
         out.append(_term("deposit_inr", money[0], "INR", money[1]))
     # "being six (6) months' rent" states the ratio directly — far more reliable
     # than dividing by a monthly rent that may live in a different clause.
-    m = _find(rf"({_NUM}\s*(?:\(\s*\d+\s*\))?)\s*{_MONTH_WORDS}[''`]?s?\s+rent", text)
+    # Also "half (0.5) a month's rent", and "licence fee" for leave-and-licence.
+    m = _find(
+        rf"({_NUM})\s*(?:\(\s*(\d+(?:\.\d+)?)\s*\)\s*)?(?:an?\s+)?"
+        rf"{_MONTH_WORDS}[''’`]?s?\s+(?:rent|licen[cs]e\s+fee)",
+        text,
+    )
     if m:
-        val = _value_of(m.group(0))
+        val = parse_indian_digits(m.group(2)) if m.group(2) else _value_of(m.group(1))
         if val is not None:
             out.append(_term("deposit_months", val, "months_of_rent", m.group(0).strip(), 0.95))
     return out
+
+
+def derive_deposit_months(deposit_inr: float, monthly_rent_inr: float) -> Term | None:
+    """Deposit in months of rent, when the agreement states both only in rupees.
+
+    The comparison data is in months, so a deposit given only as "Rs. 11,000"
+    could not be compared at all. Marked `derived` so the report can say the
+    figure was worked out rather than read.
+    """
+    if monthly_rent_inr <= 0:
+        return None
+    months = round(deposit_inr / monthly_rent_inr, 2)
+    return Term(
+        field="deposit_months",
+        raw=f"Rs. {deposit_inr:,.0f} deposit / Rs. {monthly_rent_inr:,.0f} rent",
+        value=months,
+        unit="months_of_rent",
+        extractor="derived",
+        confidence=0.8,
+    )
 
 
 def extract_refund(text: str) -> list[Term]:

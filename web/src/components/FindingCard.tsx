@@ -31,6 +31,7 @@ export function FindingCard({
   const sev = SEVERITY[finding.severity] ?? SEVERITY.low;
   const ev = finding.evidence;
   const pct = (x: number) => `${Math.round(x * 100)}%`;
+  const unit = ev.term?.unit ? ` ${ev.term.unit}` : "";
 
   return (
     <article className="bg-card border border-line rounded-xl p-5 mb-4">
@@ -44,7 +45,9 @@ export function FindingCard({
           {sev.label}
         </span>
       </header>
-      <p className="text-xs text-muted mt-1 mb-3">clause {finding.clauseId}</p>
+      <p className="text-xs text-muted mt-1 mb-3">
+        {ev.missingClause ? "not in the document" : `clause ${finding.clauseId}`}
+      </p>
 
       <p className="text-[15px] leading-relaxed m-0">{finding.plainLanguage}</p>
 
@@ -92,7 +95,10 @@ export function FindingCard({
           )}
           {ev.norm && (
             <>
-              <Row label="Typical">{ev.norm.median}</Row>
+              <Row label="Typical">
+                {ev.norm.median}
+                {unit}
+              </Row>
               <Row label="Percentile">
                 {pct(ev.norm.percentile)}{" "}
                 <span className="text-muted">
@@ -110,7 +116,13 @@ export function FindingCard({
           )}
           {ev.anchor && (
             <Row label="Statute">
-              {ev.anchor.source}
+              {ev.anchor.source} —{" "}
+              {ev.anchor.comparison === "max" ? "at most" : "at least"}{" "}
+              {ev.anchor.value} {ev.anchor.unit.replace(/_/g, " ")}
+              {ev.anchor.exceeded ? ", which yours is outside" : ""}
+              {ev.anchor.note && (
+                <span className="block text-muted">{ev.anchor.note}</span>
+              )}
               {!ev.anchor.applies && (
                 <span className="text-muted">
                   {" "}

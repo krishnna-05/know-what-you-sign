@@ -46,7 +46,9 @@ def words_to_number(text: str) -> float | None:
     Returns None when the phrase contains no number words at all, so the caller
     can distinguish "not a number" from "zero".
     """
-    tokens = [t for t in _WORD_RE.findall(text.lower()) if t not in {"and", "only", "rupees", "rs"}]
+    tokens = [
+        t for t in _WORD_RE.findall(text.lower()) if t not in {"and", "a", "only", "rupees", "rs"}
+    ]
     if not tokens:
         return None
 
@@ -60,6 +62,10 @@ def words_to_number(text: str) -> float | None:
             seen_any = True
         elif tok in _TENS:
             current += _TENS[tok]
+            seen_any = True
+        elif tok == "half":
+            # "half a month's rent", "one and a half months"
+            current += 0.5
             seen_any = True
         elif tok in _SCALES:
             scale = _SCALES[tok]

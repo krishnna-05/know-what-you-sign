@@ -53,7 +53,9 @@ SPECS = [
 
 def build(n: int = 300) -> NormStore:
     rng = np.random.default_rng(SEED)
-    store = NormStore(domain="residential_lease", version=VERSION)
+    store = NormStore(
+        domain="residential_lease", version=VERSION, label="Invented demo data (for testing only)"
+    )
     for field_key, unit, gen in SPECS:
         for value in gen(rng, n):
             store.add(field_key, float(value), unit, source="SYNTHETIC")

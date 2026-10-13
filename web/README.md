@@ -24,6 +24,10 @@ python scripts/serve.py          # one process, one port, no CORS
 
 ## Notes
 
+- **Demo data is hidden in production.** Synthetic corpora are offered only
+  with `serve.py --dev` or `serve.py --demo-data`, so invented percentiles
+  never reach someone checking a real contract.
+
 - **Nothing is stored.** The uploaded PDF is written to a temporary file only
   because the reader needs a path, deleted when the request ends, and its
   contents are never logged.

@@ -45,8 +45,15 @@ RULES: dict[str, list[Rule]] = {
     "notice_period": [
         (r"(?:prior\s+)?(?:written\s+)?notice\s+of\s+(?:his|her|its|their)?\s*intention", 3.0),
         (r"notice\s+(?:period|to\s+quit)", 2.5),
-        (r"months?\s+(?:prior\s+)?(?:written\s+)?notice", 2.5),
-        (r"days?\s+(?:prior\s+)?(?:written\s+)?notice", 2.0),
+        # A duration attached to "notice" is the defining feature, so it must
+        # outweigh a TERMINATION heading inherited from the parent clause.
+        (r"(?:months?|weeks?)\s+(?:prior\s+)?(?:written\s+)?notice", 3.5),
+        (r"days?\s+(?:prior\s+)?(?:written\s+)?notice", 3.0),
+        (r"notice\s+to\s+(?:vacate|terminate|quit|the\s+other)", 2.5),
+        (r"vacate\s+(?:the\s+premises\s+)?by\s+giving", 2.5),
+        # "may terminate ... by giving fifteen (15) days notice" fixes a notice
+        # period; without this it ties with termination and abstains.
+        (r"by\s+giving\s+.{0,40}?notice", 1.5),
         (r"intention\s+to\s+vacate", 2.0),
         (r"enter\s+and\s+inspect", -3.0),  # entry clauses also mention notice
     ],
@@ -56,7 +63,9 @@ RULES: dict[str, list[Rule]] = {
         (r"hand\s+over\s+vacant", 1.5),
     ],
     "rent_and_escalation": [
-        (r"monthly\s+rent", 3.0), (r"\brent\s+(?:of|shall\s+be)", 2.0),
+        (r"monthly\s+(?:rent|licen[cs]e\s+fee)", 3.0), (r"\brent\s+(?:of|shall\s+be)", 2.0),
+        # Leave-and-licence agreements (standard in Maharashtra) call it this.
+        (r"licen[cs]e\s+fee", 3.0),
         (r"enhanc|escalat|increas(?:e|ed)\s+by", 2.5),
         (r"payable\s+(?:on|before)", 1.0),
         (r"deposit", -1.0),
@@ -79,6 +88,7 @@ RULES: dict[str, list[Rule]] = {
     "entry_and_inspection": [
         (r"enter\s+and\s+inspect", 4.0), (r"right\s+of\s+(?:entry|access)", 3.0),
         (r"inspect(?:ion)?\s+the\s+premises", 3.0),
+        (r"(?:may|shall\s+be\s+entitled\s+to)\s+enter\s+the\s+premises", 3.0),
         (r"reasonable\s+times?", 1.0),
     ],
     "subletting": [
@@ -144,8 +154,21 @@ class Prediction:
     matched: list[str]
 
 
+# Evidence from an inherited heading counts for less than the clause's own
+# words. At full weight, "1. TERM AND LOCK-IN" made every sub-clause beneath it
+# a lock-in, including the one that only states the length of the tenancy.
+HEADING_WEIGHT = 0.5
+
+
 def classify_text(text: str, domain: Domain | None = None) -> Prediction:
-    """Score a clause against every rule set and return the best-supported type."""
+    """Score a clause against every rule set and return the best-supported type.
+
+    `text` may be `Clause.context_text` - "HEADING [SEP] body" - in which case
+    heading matches are discounted by HEADING_WEIGHT.
+    """
+    heading, sep, body = text.partition(" [SEP] ")
+    if not sep:
+        heading, body = "", text
     from kwys import config as C
 
     allowed = set(C.clause_types(domain)) if domain else set(_COMPILED)
@@ -159,10 +182,14 @@ def classify_text(text: str, domain: Domain | None = None) -> Prediction:
         total = 0.0
         hits: list[str] = []
         for pattern, weight in rules:
-            if pattern.search(text):
+            if pattern.search(body):
                 total += weight
-                if weight > 0:
-                    hits.append(pattern.pattern)
+            elif heading and pattern.search(heading):
+                total += weight * HEADING_WEIGHT
+            else:
+                continue
+            if weight > 0:
+                hits.append(pattern.pattern)
         if total > 0:
             scores[ctype] = round(total, 2)
             matched[ctype] = hits

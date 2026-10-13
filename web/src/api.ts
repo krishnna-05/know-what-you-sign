@@ -23,10 +23,10 @@ export interface AnalyseInput {
   file: File;
   role: string;
   domain: string;
+  /** Empty means "the server's default corpus". */
   corpusVersion: string;
   city?: string;
   state?: string;
-  semantic?: boolean;
 }
 
 export function analyse(input: AnalyseInput): Promise<AnalysisResult> {
@@ -34,10 +34,9 @@ export function analyse(input: AnalyseInput): Promise<AnalysisResult> {
   form.append("file", input.file);
   form.append("role", input.role);
   form.append("domain", input.domain);
-  form.append("corpus_version", input.corpusVersion);
+  if (input.corpusVersion) form.append("corpus_version", input.corpusVersion);
   if (input.city) form.append("city", input.city);
   if (input.state) form.append("state", input.state);
-  form.append("semantic", String(Boolean(input.semantic)));
   return fetch("/api/analyse", { method: "POST", body: form }).then((r) =>
     unwrap<AnalysisResult>(r),
   );

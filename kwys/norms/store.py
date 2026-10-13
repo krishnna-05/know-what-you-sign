@@ -161,9 +161,13 @@ class NormStore:
         domain: str,
         version: str = "v1",
         corpus_bias: str | None = None,
+        label: str | None = None,
     ) -> None:
         self.domain = domain
         self.version = version
+        # What a reader is shown instead of the version string, which is a
+        # maintainer's identifier ("judgments-v1") and means nothing to them.
+        self.label = label
         # A one-line statement of what this corpus over- or under-represents,
         # carried into the manifest and surfaced in every report built on it.
         self.corpus_bias = corpus_bias
@@ -190,10 +194,6 @@ class NormStore:
     def __len__(self) -> int:
         return len(self._norms)
 
-    @property
-    def field_keys(self) -> list[str]:
-        return sorted(self._norms)
-
     def coverage(self) -> dict[str, dict[str, Any]]:
         """What the store can and cannot currently speak to.
 
@@ -218,6 +218,7 @@ class NormStore:
             "fields": self.coverage(),
             "min_n": MIN_N,
             "corpus_bias": self.corpus_bias,
+            "label": self.label,
         }
         (out / "_manifest.json").write_text(json.dumps(manifest, indent=2))
         log.info("Wrote %d field norms to %s", len(self._norms), out)
@@ -230,7 +231,9 @@ class NormStore:
         manifest = path / "_manifest.json"
         if manifest.exists():
             try:
-                store.corpus_bias = json.loads(manifest.read_text()).get("corpus_bias")
+                meta = json.loads(manifest.read_text())
+                store.corpus_bias = meta.get("corpus_bias")
+                store.label = meta.get("label")
             except (OSError, ValueError):
                 pass
         if not path.exists():
@@ -251,3 +254,33 @@ class NormStore:
     @property
     def is_empty(self) -> bool:
         return not self._norms
+
+
+def is_synthetic(version: str) -> bool:
+    return "SYNTHETIC" in version.upper()
+
+
+def available_versions(root: Path | str, domain: str) -> list[str]:
+    """Every corpus version built for this domain, real ones first.
+
+    Synthetic corpora sort last so they can never become the default: a warning
+    banner is not enough protection when the alternative is someone skimming
+    fabricated percentiles.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    versions = [p.name for p in root.iterdir() if (p / domain).is_dir()]
+    return sorted(versions, key=lambda v: (is_synthetic(v), v.lower()))
+
+
+def display_label(store: NormStore) -> str:
+    """The reader-facing name of a corpus, whatever its manifest says."""
+    if is_synthetic(store.version):
+        return "Invented demo data (for testing only)"
+    return store.label or store.version
+
+
+def default_version(root: Path | str, domain: str) -> str | None:
+    """The corpus to compare against when nobody asked for one: the first real one."""
+    return next((v for v in available_versions(root, domain) if not is_synthetic(v)), None)

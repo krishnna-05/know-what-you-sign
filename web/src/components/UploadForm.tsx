@@ -1,6 +1,9 @@
 import { useRef, useState } from "react";
 import type { Config, DomainOption } from "../types";
 
+// Mirrors MAX_UPLOAD_BYTES in kwys/api/main.py.
+const MAX_UPLOAD_MB = 25;
+
 export interface FormState {
   domain: string;
   role: string;
@@ -25,12 +28,15 @@ export function UploadForm({
   // but it is a visible choice, never an assumption, since every risk
   // direction in the report depends on it.
   const [role, setRole] = useState(current?.weakerParty ?? "");
+  // The server lists real corpora first, so the first is the honest default.
+  // Empty when none is built: the server then runs without comparisons.
   const [corpusVersion, setCorpusVersion] = useState(
-    current?.corpora[0]?.version ?? "v1",
+    current?.corpora[0]?.version ?? "",
   );
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -38,7 +44,24 @@ export function UploadForm({
     setDomain(value);
     const next = config.domains.find((d) => d.value === value);
     setRole(next?.weakerParty ?? "");
-    setCorpusVersion(next?.corpora[0]?.version ?? "v1");
+    setCorpusVersion(next?.corpora[0]?.version ?? "");
+  }
+
+  // Checked here as well as on the server so a wrong file is caught before the
+  // wait, not after it.
+  function pickFile(f: File | null) {
+    if (f && !/\.pdf$/i.test(f.name) && f.type !== "application/pdf") {
+      setFile(null);
+      setFileError(`${f.name} is not a PDF. Only PDF agreements can be read.`);
+      return;
+    }
+    if (f && f.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setFile(null);
+      setFileError(`${f.name} is larger than ${MAX_UPLOAD_MB} MB.`);
+      return;
+    }
+    setFileError(null);
+    setFile(f);
   }
 
   const corpus = current?.corpora.find((c) => c.version === corpusVersion);
@@ -49,7 +72,17 @@ export function UploadForm({
       className="bg-card border border-line rounded-xl p-5"
       onSubmit={(e) => {
         e.preventDefault();
-        if (file) onSubmit({ domain, role, corpusVersion, city, state, file });
+        // City and state are only asked for agreements where they mean
+        // something; never send values left over from another agreement type.
+        if (file)
+          onSubmit({
+            domain,
+            role,
+            corpusVersion,
+            city: isTos ? "" : city.trim(),
+            state: isTos ? "" : state.trim(),
+            file,
+          });
       }}
     >
       <label className="block text-sm font-medium mb-1">
@@ -101,18 +134,35 @@ export function UploadForm({
       {!isTos && (current?.corpora.length ?? 0) > 0 && (
         <>
           <label className="block text-sm font-medium mb-1">Compare against</label>
-          <select
-            value={corpusVersion}
-            onChange={(e) => setCorpusVersion(e.target.value)}
-            className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-ink"
-          >
-            {current?.corpora.map((c) => (
-              <option key={c.version} value={c.version}>
-                {c.version} — {c.usable} field{c.usable === 1 ? "" : "s"} usable
-                {c.synthetic ? " (synthetic demo data)" : ""}
-              </option>
-            ))}
-          </select>
+          {/* A choice of one is not a choice: show it as a fact instead. */}
+          {current?.corpora.length === 1 ? (
+            <p className="m-0 text-ink">
+              {current.corpora[0].label ?? current.corpora[0].version}
+            </p>
+          ) : (
+            <select
+              value={corpusVersion}
+              onChange={(e) => setCorpusVersion(e.target.value)}
+              className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-ink"
+            >
+              {current?.corpora.map((c) => (
+                <option key={c.version} value={c.version}>
+                  {c.label ?? c.version}
+                </option>
+              ))}
+            </select>
+          )}
+          {corpus && (
+            <p className="text-xs text-muted mt-2 mb-0">
+              Compares:{" "}
+              {corpus.coverage
+                .filter((f) => f.usable)
+                .map((f) => `${f.label.toLowerCase()} (${f.n} agreements)`)
+                .join(", ") || "nothing yet — too few agreements for any term"}
+              .
+              {corpus.bias && <> {corpus.bias}</>}
+            </p>
+          )}
           {corpus?.synthetic && (
             <p className="mt-2 mb-0 text-sm text-critical border border-critical rounded-lg px-3 py-2">
               <strong>These numbers are invented.</strong> This corpus exists to
@@ -174,7 +224,7 @@ export function UploadForm({
           e.preventDefault();
           setDragging(false);
           const dropped = e.dataTransfer.files?.[0];
-          if (dropped) setFile(dropped);
+          if (dropped) pickFile(dropped);
         }}
         onClick={() => inputRef.current?.click()}
         className={`border-2 border-dashed rounded-xl px-4 py-8 text-center cursor-pointer transition-colors ${
@@ -185,7 +235,7 @@ export function UploadForm({
           ref={inputRef}
           type="file"
           accept="application/pdf,.pdf"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
           className="sr-only"
         />
         {file ? (
@@ -200,7 +250,18 @@ export function UploadForm({
             Drop the agreement here, or click to choose a PDF
           </p>
         )}
+        <p className="text-xs text-muted mt-2 mb-0">
+          {config.capabilities.ocr
+            ? `Scanned or photographed pages are read too. Up to ${MAX_UPLOAD_MB} MB.`
+            : `Scanned pages cannot be read on this server — the PDF needs selectable text. Up to ${MAX_UPLOAD_MB} MB.`}
+        </p>
       </div>
+
+      {fileError && (
+        <p className="text-sm text-critical mt-2 mb-0" role="alert">
+          {fileError}
+        </p>
+      )}
 
       <button
         type="submit"
@@ -211,7 +272,8 @@ export function UploadForm({
       </button>
 
       <p className="text-xs text-muted text-center mt-3 mb-0">
-        Analysed on this machine. Your document is never stored.
+        Your document is deleted as soon as the report is ready. It is never
+        kept or logged.
       </p>
     </form>
   );

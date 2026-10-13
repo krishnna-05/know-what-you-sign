@@ -15,6 +15,7 @@ there is one port and no CORS. That also makes deployment a single container.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -27,8 +28,14 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--dev", action="store_true",
-                    help="API only; run the Vite dev server separately")
+                    help="API only; run the Vite dev server separately. Implies --demo-data.")
+    ap.add_argument("--demo-data", action="store_true",
+                    help="Offer synthetic demo corpora in the interface (hidden by default)")
     args = ap.parse_args()
+
+    # Read by kwys.api.main on every request, so set it before the app loads.
+    if args.dev or args.demo_data:
+        os.environ["KWYS_DEMO_DATA"] = "1"
 
     import uvicorn
 

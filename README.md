@@ -177,7 +177,7 @@ rather than quietly left out.
 ```bash
 uv venv --python 3.12
 uv pip install -e ".[dev]"          # core: parsing, extraction, statistics, CLI
-uv pip install -e ".[ml,ui,ocr]"    # add: transformers, Streamlit, OCR
+uv pip install -e ".[ml,ocr]"       # add: transformers, OCR
 
 # what can the system currently speak to?
 kwys doctor
@@ -189,8 +189,10 @@ kwys analyse tests/fixtures/sample_lease.pdf --role tenant --corpus-version SYNT
 # inspect what the segmenter and classifier saw, when a report looks wrong
 kwys segment tests/fixtures/sample_lease.pdf
 
-# the web interface
-streamlit run ui/app.py
+# the web interface (React + FastAPI; see web/README.md)
+uv pip install -e ".[serve]"
+cd web && npm install && npm run build && cd ..
+python scripts/serve.py                            # http://127.0.0.1:8000
 ```
 
 ### Building real norms

@@ -12,6 +12,7 @@ is logged. Do not add request logging here without revisiting that.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ from fastapi.responses import JSONResponse
 from kwys import config as C
 from kwys.asymmetry.parties import DOMAIN_ROLES
 from kwys.models import Domain, Role
-from kwys.norms.store import MIN_N, NormStore
+from kwys.norms.store import NormStore, available_versions, display_label, is_synthetic
 from kwys.pipeline import DATA_ROOT, analyse
 
 log = logging.getLogger(__name__)
@@ -55,37 +56,48 @@ ROLE_LABELS: dict[Role, tuple[str, str]] = {
 }
 
 
-def _corpora(domain: Domain) -> list[dict[str, Any]]:
-    """Norm stores built for this domain, real ones first.
+def demo_data_enabled() -> bool:
+    """Whether synthetic corpora may be offered at all.
 
-    Synthetic corpora sort last and can never be the default: a warning banner
-    is not enough protection when the alternative is someone skimming
-    fabricated percentiles.
+    Off unless asked for (`serve.py --dev` or `--demo-data`). Invented
+    percentiles have no business in front of someone checking a real contract,
+    however loud the warning next to them.
     """
-    root = DATA_ROOT / "norms"
-    if not root.exists():
-        return []
+    return os.environ.get("KWYS_DEMO_DATA") == "1"
 
+
+def _versions(domain: Domain) -> list[str]:
+    """Corpora a reader may choose for this domain, real ones first."""
+    versions = available_versions(DATA_ROOT / "norms", domain.value)
+    if demo_data_enabled():
+        return versions
+    return [v for v in versions if not is_synthetic(v)]
+
+
+def _corpora(domain: Domain) -> list[dict[str, Any]]:
+    """Norm stores a reader may choose, real ones first (the first is the default)."""
+    root = DATA_ROOT / "norms"
     out = []
-    for path in root.iterdir():
-        if not (path / domain.value).is_dir():
-            continue
-        store = NormStore.load(root, domain.value, path.name)
-        coverage = store.coverage()
+    for version in _versions(domain):
+        store = NormStore.load(root, domain.value, version)
         out.append(
             {
-                "version": path.name,
-                "synthetic": "SYNTHETIC" in path.name.upper(),
-                "fields": len(store),
-                "usable": sum(1 for v in coverage.values() if v["sufficient"]),
+                "version": version,
+                "label": display_label(store),
+                "synthetic": is_synthetic(version),
                 "bias": store.corpus_bias,
                 "coverage": [
-                    {"field": k, "n": v["n"], "usable": v["sufficient"]}
-                    for k, v in coverage.items()
+                    {
+                        "field": k,
+                        "label": C.display_name(k.split(".")[0]),
+                        "n": v["n"],
+                        "usable": v["sufficient"],
+                    }
+                    for k, v in store.coverage().items()
                 ],
             }
         )
-    return sorted(out, key=lambda c: (c["synthetic"], c["version"].lower()))
+    return out
 
 
 @app.get("/api/config")
@@ -103,7 +115,7 @@ def get_config() -> dict[str, Any]:
             {
                 "value": domain.value,
                 "label": spec["display_name"],
-                "weakerParty": spec["weaker_party"],
+                "weakerParty": C.weaker_party(domain).value,
                 "roles": [
                     {
                         "value": r.value,
@@ -118,13 +130,11 @@ def get_config() -> dict[str, Any]:
 
     return {
         "domains": domains,
-        "minSampleSize": MIN_N,
         "capabilities": {
             "ocr": ocr_available(),
             "clauseClassifier": active_classifier(),
             "unfairDetector": active_detector(),
         },
-        "unverifiedAnchors": C.unverified_anchors(),
     }
 
 
@@ -133,10 +143,9 @@ async def post_analyse(
     file: UploadFile = File(...),
     role: str = Form(...),
     domain: str = Form(...),
-    corpus_version: str = Form("v1"),
+    corpus_version: str | None = Form(None),
     city: str | None = Form(None),
     state: str | None = Form(None),
-    semantic: bool = Form(False),
 ) -> JSONResponse:
     """Analyse one uploaded agreement."""
     try:
@@ -150,7 +159,18 @@ async def post_analyse(
             detail=f"{role} is not a party to a {domain}",
         )
 
-    payload = await file.read()
+    # Only a corpus that is actually built can be named. Anything else would
+    # silently produce a report with no comparisons in it - and the value is a
+    # path component, so it must never reach the filesystem unchecked.
+    if corpus_version and corpus_version not in _versions(domain_enum):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No reference corpus called {corpus_version!r} is built for {domain}.",
+        )
+
+    # Read one byte past the cap rather than the whole body, so an oversized
+    # upload is refused without first being held in memory in full.
+    payload = await file.read(MAX_UPLOAD_BYTES + 1)
     if not payload:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
     if len(payload) > MAX_UPLOAD_BYTES:
@@ -173,8 +193,7 @@ async def post_analyse(
                 domain=domain_enum,
                 user_city=city or None,
                 user_state=state or None,
-                corpus_version=corpus_version,
-                semantic=semantic,
+                corpus_version=corpus_version or None,
             )
         except Exception as exc:  # noqa: BLE001 - surface a message, not a stack
             log.exception("analysis failed")
@@ -182,18 +201,21 @@ async def post_analyse(
                 status_code=500, detail=f"Could not analyse that document: {exc}"
             ) from exc
 
+    corpus_label = None
+    if result.corpus_version:
+        corpus_label = display_label(
+            NormStore.load(DATA_ROOT / "norms", domain_enum.value, result.corpus_version)
+        )
+
     return JSONResponse(
         {
-            "summary": result.summary_line(),
             "clausesChecked": result.clauses_checked,
-            "corpusVersion": result.corpus_version,
+            "corpusLabel": corpus_label,
             "wasOcred": result.document.was_ocred,
             "pageCount": result.document.page_count,
-            "lowStructure": result.document.low_structure,
-            "role": result.document.user_role.value,
             "warnings": result.warnings,
             "findings": [_finding_json(f) for f in result.findings],
-            "distributions": _distributions(result, domain_enum, corpus_version),
+            "distributions": _distributions(result, domain_enum),
         }
     )
 
@@ -203,7 +225,6 @@ def _finding_json(f) -> dict[str, Any]:
     return {
         "clauseId": f.clause_id,
         "severity": f.severity.value,
-        "score": round(f.score, 3),
         "headline": f.headline,
         "plainLanguage": f.plain_language,
         "question": f.question_to_ask,
@@ -224,8 +245,6 @@ def _finding_json(f) -> dict[str, Any]:
                     "ciLow": ev.norm.ci_low,
                     "ciHigh": ev.norm.ci_high,
                     "n": ev.norm.n,
-                    "robustZ": ev.norm.robust_z,
-                    "sufficient": ev.norm.sufficient,
                 }
                 if ev.norm
                 else None
@@ -233,6 +252,8 @@ def _finding_json(f) -> dict[str, Any]:
             "anchor": (
                 {
                     "value": ev.anchor.value,
+                    "comparison": ev.anchor.comparison,
+                    "unit": ev.anchor.unit,
                     "source": ev.anchor.source,
                     "note": ev.anchor.note,
                     "exceeded": ev.anchor.exceeded,
@@ -242,18 +263,14 @@ def _finding_json(f) -> dict[str, Any]:
                 else None
             ),
             "directionRationale": ev.direction_rationale,
-            "asymmetry": ev.asymmetry,
             "missingClause": ev.missing_clause,
             "venueDistanceKm": ev.venue_distance_km,
-            "semanticOutlier": ev.semantic_outlier,
             "unfairTypes": ev.unfair_types,
         },
     }
 
 
-def _distributions(
-    result, domain: Domain, corpus_version: str
-) -> dict[str, dict[str, Any]]:
+def _distributions(result, domain: Domain) -> dict[str, dict[str, Any]]:
     """The reference values behind each norm-backed finding, for the charts.
 
     Sent as counts per distinct value rather than raw observations: the chart
@@ -264,10 +281,11 @@ def _distributions(
         for f in result.findings
         if f.evidence.norm and f.evidence.norm.sufficient
     }
-    if not fields:
+    if not fields or not result.corpus_version:
         return {}
 
-    store = NormStore.load(DATA_ROOT / "norms", domain.value, corpus_version)
+    # The version the pipeline actually used, which may be the default it chose.
+    store = NormStore.load(DATA_ROOT / "norms", domain.value, result.corpus_version)
     out: dict[str, dict[str, Any]] = {}
     for field in fields:
         norm = store.get(field)

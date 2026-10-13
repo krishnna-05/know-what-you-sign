@@ -159,12 +159,26 @@ def find_asymmetries(
     return findings
 
 
+# A protection can be provided by a clause of a neighbouring type. "Nothing
+# about how disputes are settled" is false when a clause names the courts that
+# will hear them, and "nothing about ending the agreement" is false when the
+# notice clauses say how either side ends it.
+COVERED_BY: dict[str, set[str]] = {
+    "dispute_resolution": {"governing_law"},
+    "termination": {"notice_period"},
+}
+
+
 def find_missing_clauses(clauses: list[Clause], domain: Domain) -> list[tuple[str, str]]:
     """Protections that comparable agreements normally contain and this one lacks."""
     from kwys import config as C
 
     present = {c.clause_type for c in clauses if c.clause_type}
-    missing = [ct for ct in C.expected_clauses(domain) if ct not in present]
+    missing = [
+        ct
+        for ct in C.expected_clauses(domain)
+        if ct not in present and not (COVERED_BY.get(ct, set()) & present)
+    ]
     return [
         (
             ct,

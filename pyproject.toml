@@ -79,6 +79,7 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.108",      # property tests for unit normalisation
     "ruff>=0.6",
+    "httpx>=0.27",            # FastAPI's TestClient, for tests/test_api.py
 ]
 
 [project.scripts]

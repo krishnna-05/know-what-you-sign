@@ -237,10 +237,6 @@ class Finding(BaseModel):
     question_to_ask: str | None = None  # what to actually say to the other side
     evidence: Evidence  # required, by design
 
-    @property
-    def is_actionable(self) -> bool:
-        return self.question_to_ask is not None
-
 
 class AnalysisResult(BaseModel):
     document: Document

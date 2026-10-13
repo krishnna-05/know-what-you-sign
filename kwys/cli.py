@@ -45,8 +45,9 @@ def analyse(
     html_out: Annotated[Path | None, typer.Option("--html", help="Write an HTML report.")] = None,
     json_out: Annotated[Path | None, typer.Option("--json", help="Write evidence JSON.")] = None,
     corpus_version: Annotated[
-        str, typer.Option(help="Which norm store to compare against.")
-    ] = "v1",
+        str | None,
+        typer.Option(help="Which norm store to compare against. Default: the first real one."),
+    ] = None,
     show_low: Annotated[bool, typer.Option(help="Include low-severity findings.")] = False,
     semantic: Annotated[
         bool,

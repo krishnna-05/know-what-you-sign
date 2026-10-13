@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual runs are the only way the slow OCR job below is reached.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -19,18 +21,35 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      # Core only. The ml/ocr extras pull ~2 GB of torch and model weights for
-      # tests that are deselected here anyway - the fast suite covers parsing,
-      # extraction, statistics, scoring and config, which is where regressions
-      # actually happen.
+      # Core plus the HTTP layer. The ml/ocr extras pull ~2 GB of torch and
+      # model weights for tests that are deselected here anyway - the fast
+      # suite covers parsing, extraction, statistics, scoring, config and the
+      # API, which is where regressions actually happen.
       - name: Install
-        run: uv pip install --system -e ".[dev]"
+        run: uv pip install --system -e ".[dev,serve]"
 
       - name: Lint
         run: ruff check .
 
       - name: Test
         run: pytest
+
+  # The interface is a typed client of the API: a renamed field breaks the
+  # type check here before it breaks a page in someone's browser.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build
 
   # The slow suite needs OCR models. Run it on demand rather than on every push.
   slow:

@@ -52,7 +52,9 @@ def build(
     corpus: Path | str, domain: Domain, version: str = "v1"
 ) -> tuple[NormStore, dict[str, Any]]:
     corpus = Path(corpus)
-    store = NormStore(domain=domain.value, version=version)
+    store = NormStore(
+        domain=domain.value, version=version, label="Real agreements, collected directly"
+    )
     prov = _provenance(corpus)
 
     stats: dict[str, Any] = {
@@ -145,7 +147,12 @@ def build_from_judgments(
     three times must not weigh three times as much as one that states it once.
     """
     values_path = Path(values_path)
-    store = NormStore(domain=domain.value, version=version, corpus_bias=JUDGMENT_BIAS)
+    store = NormStore(
+        domain=domain.value,
+        version=version,
+        corpus_bias=JUDGMENT_BIAS,
+        label="Real agreements, from court cases",
+    )
     stats: dict[str, Any] = {"records": 0, "used": 0, "judgments": set(), "skipped": {}}
 
     best: dict[tuple[str, str], dict] = {}  # (doc_id, field) -> record

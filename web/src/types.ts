@@ -8,11 +8,11 @@ export interface RoleOption {
 
 export interface Corpus {
   version: string;
+  /** Absent from a backend older than the interface; fall back to `version`. */
+  label?: string;
   synthetic: boolean;
-  fields: number;
-  usable: number;
   bias: string | null;
-  coverage: { field: string; n: number; usable: boolean }[];
+  coverage: { field: string; label: string; n: number; usable: boolean }[];
 }
 
 export interface DomainOption {
@@ -25,13 +25,11 @@ export interface DomainOption {
 
 export interface Config {
   domains: DomainOption[];
-  minSampleSize: number;
   capabilities: {
     ocr: boolean;
     clauseClassifier: "rules" | "trained";
     unfairDetector: "rules" | "trained";
   };
-  unverifiedAnchors: string[];
 }
 
 export interface Norm {
@@ -41,8 +39,6 @@ export interface Norm {
   ciLow: number;
   ciHigh: number;
   n: number;
-  robustZ: number;
-  sufficient: boolean;
 }
 
 export interface Evidence {
@@ -53,23 +49,22 @@ export interface Evidence {
   norm: Norm | null;
   anchor: {
     value: number;
+    comparison: "max" | "min";
+    unit: string;
     source: string;
     note: string | null;
     exceeded: boolean;
     applies: boolean;
   } | null;
   directionRationale: string | null;
-  asymmetry: boolean;
   missingClause: boolean;
   venueDistanceKm: number | null;
-  semanticOutlier: number | null;
   unfairTypes: string[];
 }
 
 export interface Finding {
   clauseId: string;
   severity: Severity;
-  score: number;
   headline: string;
   plainLanguage: string;
   question: string | null;
@@ -83,13 +78,10 @@ export interface Distribution {
 }
 
 export interface AnalysisResult {
-  summary: string;
   clausesChecked: number;
-  corpusVersion: string | null;
+  corpusLabel: string | null;
   wasOcred: boolean;
   pageCount: number;
-  lowStructure: boolean;
-  role: string;
   warnings: string[];
   findings: Finding[];
   distributions: Record<string, Distribution>;

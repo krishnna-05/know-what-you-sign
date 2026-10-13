@@ -46,11 +46,6 @@ def clause_types(domain: Domain | None = None) -> list[str]:
     return sorted(t for t, spec in types.items() if domain.value in spec.get("domains", []))
 
 
-def fields_for(clause_type: str) -> dict[str, dict[str, Any]]:
-    spec = taxonomy()["clause_types"].get(clause_type)
-    return dict(spec.get("fields") or {}) if spec else {}
-
-
 def expected_clauses(domain: Domain) -> list[str]:
     """Clause types a document of this kind should normally contain.
 

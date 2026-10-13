@@ -24,9 +24,13 @@ from kwys.asymmetry.obligations import (
 )
 from kwys.asymmetry.parties import build_party_map
 from kwys.classify.model import classify_clauses
-from kwys.extract.patterns import contradiction_warning, extract_terms
+from kwys.extract.patterns import (
+    contradiction_warning,
+    derive_deposit_months,
+    extract_terms,
+)
 from kwys.models import AnalysisResult, Document, Domain, Modality, Role, Severity
-from kwys.norms.store import NormStore
+from kwys.norms.store import NormStore, default_version, is_synthetic
 from kwys.score.scorer import Scorer
 from kwys.segment.segmenter import segment
 
@@ -43,11 +47,15 @@ def analyse(
     user_city: str | None = None,
     user_state: str | None = None,
     norms_root: Path | str | None = None,
-    corpus_version: str = "v1",
+    corpus_version: str | None = None,
     show_low: bool = False,
     semantic: bool = False,
 ) -> AnalysisResult:
-    """Analyse one agreement."""
+    """Analyse one agreement.
+
+    With no `corpus_version`, compares against the first real corpus built for
+    the domain - never a synthetic one.
+    """
     from kwys.ingest.pdf_reader import read_pdf
 
     parsed = read_pdf(path)
@@ -74,8 +82,12 @@ def analyse(
         clauses=clauses,
     )
 
-    norms = NormStore.load(
-        norms_root or (DATA_ROOT / "norms"), domain.value, corpus_version
+    norms_root = Path(norms_root or (DATA_ROOT / "norms"))
+    corpus_version = corpus_version or default_version(norms_root, domain.value)
+    norms = (
+        NormStore.load(norms_root, domain.value, corpus_version)
+        if corpus_version
+        else NormStore(domain.value)
     )
     is_tos = domain is Domain.CONSUMER_TOS
     if norms.corpus_bias:
@@ -84,7 +96,7 @@ def analyse(
         # sample support different claims, and the user cannot tell them apart.
         warnings.append(f"About the comparison data: {norms.corpus_bias}")
 
-    if not norms.is_empty and "SYNTHETIC" in corpus_version.upper():
+    if not norms.is_empty and is_synthetic(corpus_version):
         warnings.append(
             "THESE COMPARISONS ARE NOT REAL. This report was built against a "
             "synthetic demo corpus generated for testing. The percentages below "
@@ -100,10 +112,13 @@ def analyse(
             "deviation findings."
         )
 
+    pending_anchors = unverified_anchor_warning()
+    if pending_anchors and not is_tos:
+        warnings.append(pending_anchors)
+
     scorer = Scorer(domain=domain, role=role, norms=norms, user_state=user_state)
     pmap = build_party_map(parsed.text, domain)
     findings = []
-
 
     # --- consumer terms of service ------------------------------------------
     # A different problem shape: no numeric norms to deviate from, but an
@@ -133,6 +148,8 @@ def analyse(
         )
 
     # --- deviation findings -------------------------------------------------
+    # Extract everything first: some figures can only be worked out from terms
+    # that sit in another clause (a deposit in rupees needs the monthly rent).
     clause_terms: list[tuple] = []
     for clause in clauses:
         if not clause.clause_type or clause.clause_type == "other":
@@ -142,9 +159,11 @@ def analyse(
         if note:
             warnings.append(f"Clause {clause.id}: {note}")
 
-        terms = extract_terms(clause.clause_type, clause.text)
-        clause_terms.append((clause, terms))
+        clause_terms.append((clause, extract_terms(clause.clause_type, clause.text)))
 
+    _derive_deposit_months(clause_terms)
+
+    for clause, terms in clause_terms:
         # Some fields belong to a PARTY, not to the agreement. A notice period
         # is one side's obligation, and the same six months is a burden for
         # whoever must give it and a benefit for the other. Scoring it without
@@ -222,8 +241,12 @@ def analyse(
         if clause:
             findings.append(scorer.finding_from_asymmetry(clause, detail))
 
-    for clause_type, detail in find_missing_clauses(clauses, domain):
-        findings.append(scorer.finding_from_missing(clause_type, detail))
+    # Absence can only be claimed about a document we could read the structure
+    # of. When segmentation failed, every expected section would be reported
+    # missing - including the ones sitting in plain sight in the prose.
+    if not low_structure:
+        for clause_type, detail in find_missing_clauses(clauses, domain):
+            findings.append(scorer.finding_from_missing(clause_type, detail))
 
     # --- semantic outliers, GATED ------------------------------------------
     # Distance from the centroid says a clause is unusual, not that it is
@@ -299,6 +322,30 @@ def analyse(
         corpus_version=corpus_version if not norms.is_empty else None,
         warnings=warnings,
     )
+
+
+def _derive_deposit_months(clause_terms: list[tuple]) -> None:
+    """Add a deposit-in-months figure where only rupee amounts are stated.
+
+    The comparison data is in months of rent, so "a deposit of Rs. 11,000" on a
+    Rs. 22,000 rent could not be compared at all. Done only when the agreement
+    states exactly one monthly rent: with several, which one is ambiguous.
+    """
+    rents = {
+        t.value for _, terms in clause_terms for t in terms if t.field == "monthly_rent_inr"
+    }
+    if len(rents) != 1:
+        return
+    (rent,) = rents
+    for _, terms in clause_terms:
+        fields = {t.field for t in terms}
+        if "deposit_months" in fields:
+            continue
+        deposit = next((t for t in terms if t.field == "deposit_inr"), None)
+        if deposit is not None:
+            derived = derive_deposit_months(float(deposit.value), float(rent))
+            if derived is not None:
+                terms.append(derived)
 
 
 def _merge_same_clause_findings(findings: list) -> list:

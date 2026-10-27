@@ -271,7 +271,11 @@ def available_versions(root: Path | str, domain: str) -> list[str]:
     if not root.is_dir():
         return []
     versions = [p.name for p in root.iterdir() if (p / domain).is_dir()]
-    return sorted(versions, key=lambda v: (is_synthetic(v), v.lower()))
+    # Self-reported figures sit between the two: real, but unverified, so a
+    # corpus with checkable sources is preferred as the default.
+    return sorted(
+        versions, key=lambda v: (is_synthetic(v), v.startswith("contributed"), v.lower())
+    )
 
 
 def display_label(store: NormStore) -> str:

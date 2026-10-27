@@ -31,6 +31,7 @@ from kwys.extract.patterns import (
 )
 from kwys.models import (
     AnalysisResult,
+    ClauseTerms,
     Document,
     Domain,
     Modality,
@@ -68,6 +69,7 @@ def analyse(
 
     parsed = read_pdf(path)
     warnings = list(parsed.warnings)
+    diagnostics = list(parsed.diagnostics)
 
     clauses, low_structure = segment(parsed)
     if low_structure:
@@ -98,31 +100,36 @@ def analyse(
         else NormStore(domain.value)
     )
     is_tos = domain is Domain.CONSUMER_TOS
-    if norms.corpus_bias:
-        # A corpus's bias must reach the reader, not just sit in the manifest.
-        # Percentiles from litigated tenancies and percentiles from a random
-        # sample support different claims, and the user cannot tell them apart.
-        warnings.append(f"About the comparison data: {norms.corpus_bias}")
+    # A corpus's bias must reach the reader, not just sit in the manifest.
+    # Percentiles from litigated tenancies and percentiles from a random
+    # sample support different claims, and the user cannot tell them apart.
+    # Carried on the result (not in `warnings`) so each renderer can put it
+    # next to the comparisons it qualifies.
+    corpus_bias = norms.corpus_bias or None
 
     if not norms.is_empty and is_synthetic(corpus_version):
         warnings.append(
             "THESE COMPARISONS ARE NOT REAL. This report was built against a "
             "synthetic demo corpus generated for testing. The percentages below "
-            "describe invented data, not actual agreements. Build real norms "
-            "with `kwys build-norms` before showing this to anyone."
+            "describe invented data, not actual agreements."
+        )
+        diagnostics.append(
+            "Build real norms with `kwys build-norms` before showing this to anyone."
         )
 
     if norms.is_empty and not is_tos:
         warnings.append(
-            "No reference corpus is loaded, so no clause can be compared against "
-            "what is normal. Only one-sided obligations and missing clauses are "
-            "reported below. Build norms with `kwys build-norms` to enable "
-            "deviation findings."
+            "No comparison data is available for this kind of agreement yet, so "
+            "only one-sided obligations and missing clauses are reported."
+        )
+        diagnostics.append(
+            "No reference corpus is loaded. Build norms with `kwys build-norms` "
+            "to enable deviation findings."
         )
 
     pending_anchors = unverified_anchor_warning()
     if pending_anchors and not is_tos:
-        warnings.append(pending_anchors)
+        diagnostics.append(pending_anchors)
 
     scorer = Scorer(domain=domain, role=role, norms=norms, user_state=user_state)
     pmap = build_party_map(parsed.text, domain)
@@ -142,7 +149,13 @@ def analyse(
 
         findings.sort(key=lambda f: f.score, reverse=True)
         if active_detector() == "rules":
+            # The reader needs to know the check is weak; only the maintainer
+            # needs to know how to make it stronger.
             warnings.append(
+                "This check may miss many of the unfair terms an expert would "
+                "flag. Read the full terms yourself before relying on it."
+            )
+            diagnostics.append(
                 "No trained unfair-clause detector was found, so this used the "
                 "rule baseline, which finds roughly a third of what an expert "
                 "would flag. Train one with: python scripts/train_classifier.py "
@@ -153,6 +166,8 @@ def analyse(
             findings=findings,
             clauses_checked=len(clauses),
             warnings=warnings,
+            corpus_bias=corpus_bias,
+            diagnostics=diagnostics,
         )
 
     # --- deviation findings -------------------------------------------------
@@ -171,6 +186,7 @@ def analyse(
 
     _derive_deposit_months(clause_terms)
     unassessed: list[tuple] = []
+    extracted: list[ClauseTerms] = []
 
     for clause, terms in clause_terms:
         # Some fields belong to a PARTY, not to the agreement. A notice period
@@ -181,6 +197,15 @@ def analyse(
         # the agreement as a whole and are scored for either reader via the
         # direction map.
         bound = attribute_clause_to_party(clause, pmap)
+        if terms:
+            extracted.append(
+                ClauseTerms(
+                    clause_id=clause.id,
+                    clause_type=clause.clause_type,
+                    bound=bound,
+                    terms=terms,
+                )
+            )
 
         for term in terms:
             if term.field in PAIRED_FIELDS and bound is not None and bound is not role:
@@ -349,7 +374,7 @@ def analyse(
         findings = [f for f in findings if f.severity is not Severity.LOW]
 
     if pmap.unresolved:
-        warnings.append(
+        diagnostics.append(
             "Some defined parties could not be matched to a side: "
             + ", ".join(pmap.unresolved[:4])
         )
@@ -374,6 +399,9 @@ def analyse(
         corpus_version=corpus_version if not norms.is_empty else None,
         warnings=warnings,
         unassessed=not_checked,
+        corpus_bias=corpus_bias,
+        diagnostics=diagnostics,
+        extracted=extracted,
     )
 
 

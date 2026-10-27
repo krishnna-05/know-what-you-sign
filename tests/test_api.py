@@ -92,6 +92,25 @@ def test_analyse_without_a_corpus_uses_the_real_default(client):
     assert r.json()["corpusLabel"] == "Real agreements, from court cases"
 
 
+def test_reader_never_sees_setup_instructions(client, data_root):
+    """Commands for whoever runs the server stay out of the reader's report.
+
+    With no corpus for this agreement type, the pipeline has a fix to suggest -
+    but someone checking their lease cannot run `kwys build-norms`.
+    """
+    for version in ("real-v1", "SYNTHETIC-DEMO"):
+        for p in (data_root / "norms" / version).rglob("*"):
+            if p.is_file():
+                p.unlink()
+    r = _post(client)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["warnings"], "the reader is still told nothing could be compared"
+    for w in body["warnings"]:
+        assert "kwys " not in w and "scripts/" not in w and "pip install" not in w, w
+    assert "diagnostics" not in body
+
+
 @pytest.mark.parametrize("version", ["v1", "../../etc", "judgments-v1"])
 def test_unknown_corpus_is_refused(client, version):
     """It is a path component; anything not actually built is rejected."""
@@ -124,3 +143,74 @@ def test_every_charted_finding_has_its_distribution(client):
     for f in body["findings"]:
         if f["evidence"]["norm"]:
             assert f["evidence"]["field"] in body["distributions"]
+
+
+def test_report_carries_what_the_other_tabs_need(client):
+    body = _post(client, city="Bengaluru").json()
+    assert body["clauses"] and body["clauses"][0]["spans"], "the viewer needs positions"
+    assert body["facts"]["monthly_rent"]["value"] == 32_000
+    assert body["exposure"]["kind"] == "lease"
+    assert body["timeline"]["events"]
+    assert all("suggestedWording" in f for f in body["findings"])
+    assert body["shareable"], "figures are offered, never sent"
+
+
+def test_compare_two_drafts(client, tmp_path):
+    import sys
+
+    sys.path.insert(0, str(FIXTURE.parent))
+    from make_fixture import LEASE_REVISED, build
+
+    revised = build(LEASE_REVISED, tmp_path / "revised.pdf")
+    with FIXTURE.open("rb") as a, revised.open("rb") as b:
+        r = client.post(
+            "/api/compare",
+            files={"old_file": ("a.pdf", a, "application/pdf"),
+                   "new_file": ("b.pdf", b, "application/pdf")},
+            data={"role": "tenant", "domain": LEASE},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["report"]["findings"] is not None
+    assert {f["key"] for f in body["diff"]["figures"]} >= {"deposit_months", "lock_in_months"}
+
+
+def test_ask_is_answered_from_the_clauses_sent(client):
+    r = client.post("/api/ask", json={
+        "question": "Can I sublet?",
+        "domain": LEASE,
+        "clauses": [
+            {"id": "1", "text": "The Tenant shall pay rent monthly.", "type": "other"},
+            {"id": "2", "text": "The Tenant shall not sublet the premises.", "type": "subletting"},
+        ],
+    })
+    assert r.status_code == 200
+    assert r.json()["answers"][0]["clauseId"] == "2"
+
+
+def test_ask_rejects_an_oversized_question(client):
+    r = client.post("/api/ask", json={"question": "x" * 400, "domain": LEASE, "clauses": []})
+    assert r.status_code == 422
+
+
+def test_contribute_stores_numbers_only(client, data_root):
+    r = client.post("/api/contribute", json={
+        "domain": LEASE, "city": "Pune",
+        "figures": [{"key": "security_deposit.deposit_months", "value": 3}],
+    })
+    assert r.status_code == 200 and r.json()["stored"]
+    assert (data_root / "contributions" / "contributions.sqlite").exists()
+
+    r = client.post("/api/contribute", json={
+        "domain": LEASE, "figures": [{"key": "clause_text", "value": 1}],
+    })
+    assert r.status_code == 400
+
+
+def test_contributions_can_be_switched_off(client, monkeypatch):
+    monkeypatch.setenv("KWYS_CONTRIBUTIONS", "0")
+    assert _post(client).json()["shareable"] == []
+    r = client.post("/api/contribute", json={
+        "domain": LEASE, "figures": [{"key": "security_deposit.deposit_months", "value": 3}],
+    })
+    assert r.status_code == 404

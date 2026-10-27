@@ -135,6 +135,43 @@ BOUNDS = {
     "lock_in_months": (0.5, 60.0),
 }
 
+# Employment: service bonds, notice and probation, as recited in disputes over
+# a bond or a dismissal. Durations may be stated in years; a pattern that can
+# match either names its unit group `unit` and the value is converted to months.
+_DUR = rf"({_WORDNUM}|\d+)\s*(?P<unit>months?|years?)"
+EMPLOYMENT_PATTERNS: dict[str, list[tuple[re.Pattern[str], int]]] = {
+    "bond_amount_inr": [
+        (re.compile(
+            rf"(?:service\s+|employment\s+)?bond\s+(?:amount\s+)?(?:of|for){_RS}", re.I), 1),
+        (re.compile(rf"(?:service\s+|employment\s+)bond[^.]{{0,60}}?{_RS}", re.I), 1),
+        (re.compile(rf"\bbond\b[^.]{{0,60}}?{_RS}", re.I), 2),
+    ],
+    "bond_months": [
+        (re.compile(rf"bond\s+(?:period\s+)?(?:of|for)\s+(?:a\s+period\s+of\s+)?{_DUR}", re.I), 1),
+        (re.compile(
+            rf"serve\s+(?:the\s+)?(?:company|bank|employer|organi[sz]ation|respondent|"
+            rf"petitioner|plaintiff|defendant)\s+for\s+(?:a\s+)?(?:minimum\s+)?"
+            rf"(?:period\s+of\s+)?(?:at\s+least\s+)?{_DUR}", re.I), 1),
+        (re.compile(rf"{_DUR}\s+(?:service\s+)?bond", re.I), 2),
+    ],
+    "notice_months": [
+        (re.compile(rf"notice\s+(?:period\s+)?of\s+{_DUR}", re.I), 1),
+        (re.compile(
+            rf"({_WORDNUM}|\d+)\s*months?[''’]?s?\s+(?:prior\s+|advance\s+)?notice", re.I), 2),
+    ],
+    "probation_months": [
+        (re.compile(rf"probation(?:ary)?\s+(?:period\s+)?(?:of|for)\s+{_DUR}", re.I), 1),
+        (re.compile(rf"{_DUR}\s+(?:of\s+)?probation", re.I), 1),
+    ],
+}
+
+EMPLOYMENT_BOUNDS = {
+    "bond_amount_inr": (5_000.0, 50_00_000.0),
+    "bond_months": (3.0, 120.0),
+    "notice_months": (0.25, 12.0),
+    "probation_months": (1.0, 36.0),
+}
+
 # A deposit and a rent further apart than this in the text are not treated as
 # describing the same tenancy.
 MAX_PAIR_DISTANCE = 3000
@@ -158,14 +195,24 @@ def _sentence_around(text: str, start: int, end: int, width: int = 180) -> str:
     return re.sub(r"\s+", " ", text[lo:hi]).strip()
 
 
-def extract_values(judgment: Judgment) -> list[HarvestedValue]:
-    """Pull agreement figures out of a judgment's narrative text."""
+def extract_values(
+    judgment: Judgment,
+    patterns_by_field: dict[str, list[tuple[re.Pattern[str], int]]] | None = None,
+    bounds: dict[str, tuple[float, float]] | None = None,
+) -> list[HarvestedValue]:
+    """Pull agreement figures out of a judgment's narrative text.
+
+    Defaults to the tenancy patterns; pass EMPLOYMENT_PATTERNS and
+    EMPLOYMENT_BOUNDS for the employment domain.
+    """
     from kwys.extract.numbers import parse_indian_digits, words_to_number
 
+    patterns_by_field = patterns_by_field or PATTERNS
+    bounds = bounds or BOUNDS
     out: list[HarvestedValue] = []
     text = judgment.text
 
-    for field_name, patterns in PATTERNS.items():
+    for field_name, patterns in patterns_by_field.items():
         unit = "INR" if field_name.endswith("_inr") else "months"
         candidates: list[HarvestedValue] = []
         seen: set[tuple[int, float]] = set()
@@ -176,7 +223,9 @@ def extract_values(judgment: Judgment) -> list[HarvestedValue]:
                 value = parse_indian_digits(raw) or words_to_number(raw)
                 if value is None:
                     continue
-                lo, hi = BOUNDS[field_name]
+                if (m.groupdict().get("unit") or "").lower().startswith("year"):
+                    value *= 12
+                lo, hi = bounds[field_name]
                 if not (lo <= value <= hi):
                     continue
                 if (tier, value) in seen:

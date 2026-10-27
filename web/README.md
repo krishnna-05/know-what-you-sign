@@ -33,7 +33,12 @@ python scripts/serve.py          # one process, one port, no CORS
   contents are never logged.
 - **The chart is hand-drawn SVG**, not a charting library. It is six bars and
   two labels; the control over mark geometry is worth more here than the
-  abstraction, and it keeps the bundle at ~74 KB gzipped.
+  abstraction, and it keeps the main bundle at ~85 KB gzipped.
+- **pdf.js is loaded only for the Document tab.** It is most of a megabyte, so
+  it is a lazy chunk with its own worker; the report itself does not wait for
+  it. It renders the File the reader picked - the PDF is never sent back.
+- **Calendar files and the negotiation message are built in the browser.**
+  Downloads come from a Blob; nothing round-trips through the server.
 - **Colours are design tokens** redefined for dark mode rather than flipped.
   The chart pair (context gray, yours red) was validated: they separate at
   CVD delta-E 9.1 and both clear 3:1 contrast on either surface.

@@ -178,6 +178,8 @@ def _render(result, domain: Domain, corpus_version: str) -> None:
 
     for w in result.warnings:
         st.warning(w)
+    if result.corpus_bias:
+        st.warning(f"About the comparison data: {result.corpus_bias}")
 
     if not result.findings:
         st.success("Nothing stood out.")

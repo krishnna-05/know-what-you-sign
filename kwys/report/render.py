@@ -61,7 +61,13 @@ def render_terminal(result: AnalysisResult, console: Console) -> None:
 
     for w in result.warnings:
         console.print(f"[yellow]![/yellow] [yellow]{w}[/yellow]")
-    if result.warnings:
+    if result.corpus_bias:
+        console.print(
+            f"[yellow]![/yellow] [yellow]About the comparison data: {result.corpus_bias}[/yellow]"
+        )
+    for d in result.diagnostics:
+        console.print(f"[dim]setup: {d}[/dim]")
+    if result.warnings or result.corpus_bias or result.diagnostics:
         console.print()
 
     if not result.findings:
@@ -132,13 +138,14 @@ def render_html(result: AnalysisResult) -> str:
         if result.unassessed
         else ""
     )
-    warnings_html = "".join(
-        f'<li>{html.escape(w)}</li>' for w in result.warnings
-    )
+    notes = list(result.warnings)
+    if result.corpus_bias:
+        notes.append(f"About the comparison data: {result.corpus_bias}")
+    warnings_html = "".join(f'<li>{html.escape(w)}</li>' for w in notes)
     warnings_block = (
         f'<div class="warn"><strong>Before you read this:</strong>'
         f'<ul>{warnings_html}</ul></div>'
-        if result.warnings
+        if notes
         else ""
     )
     empty_note = (

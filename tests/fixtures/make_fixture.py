@@ -70,6 +70,39 @@ LEASE = [
 ]
 
 
+def _revise(blocks, replace: dict[str, str], drop: tuple[str, ...] = (), insert=()):
+    """A second draft: clauses replaced by their number, dropped, or added after one."""
+    out = []
+    for kind, text in blocks:
+        num = text.split(" ", 1)[0]
+        if num in drop:
+            continue
+        out.append((kind, replace.get(num, text)))
+        for after, block in insert:
+            if num == after:
+                out.append(block)
+    return out
+
+
+# The tenant pushed back on the first draft. Some asks were met, one got worse,
+# and a clause was added - the shape of a real second round.
+LEASE_REVISED = _revise(
+    LEASE,
+    replace={
+        "2.2": "2.2 The Lessee has paid a refundable interest-free security deposit of "
+               "Rs. 96,000/- (Rupees Ninety Six Thousand only), being three (3) months' "
+               "rent, the receipt of which the Lessor hereby acknowledges.",
+        "2.3": "2.3 The said security deposit shall be refunded to the Lessee within thirty "
+               "(30) days from the date of handing over vacant possession, after deducting "
+               "any amounts due.",
+        "1.2": "1.2 The Lessee shall not vacate the premises before the expiry of a lock-in "
+               "period of eleven (11) months from the date of commencement.",
+    },
+    drop=("3.3",),
+    insert=[("3.2", ("P", "3.3 The Lessee shall not keep any pets in the premises."))],
+)
+
+
 def _wrap(text: str, fontname: str, size: float, width: float) -> list[str]:
     """Greedy word wrap, measured with the real font metrics."""
     words, lines, cur = text.split(), [], ""

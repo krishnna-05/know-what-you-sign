@@ -58,6 +58,13 @@ The pipeline runs end to end. What works today:
 | Consumer terms of service (2nd domain) | working, with expert ground truth |
 | Evaluation harness | working — `python scripts/evaluate.py` |
 | Trained unfair-clause detector | **macro-F1 0.739** on held-out test |
+| Employment-offer corpus from judgments | working — 191 judgments, 3 of 4 fields usable |
+| Leaving-cost calculator, key dates + calendar export | working |
+| Negotiation drafts and message to the other side | working — deterministic templates |
+| Draft-to-draft comparison | working |
+| Clause highlighting in the reader's own PDF | working — rendered in the browser |
+| Questions answered from the agreement's own clauses | working — retrieval only, nothing generated |
+| Opt-in shared figures (a non-court corpus) | working — collecting; no version built yet |
 
 ### Three kinds of evidence, deliberately kept separate
 
@@ -140,6 +147,60 @@ Per category, the model is near-perfect on the structurally distinctive ones
 (Jurisdiction 0.97, Choice of law 0.96) and weakest on the two with the least
 training data (Content removal 0.45 at n=13, Arbitration 0.52 at n=7). Macro-F1
 weights those small classes equally, which is why it sits below micro.
+
+### Third domain: employment offers
+
+Service bonds, notice periods and probation hurt freshers most, and the same
+harvester finds them: disputes over a bond or a dismissal recite the
+appointment letter. Harvested from **191 judgments, 279 figures**:
+
+| field | n | median | p25–p75 | usable |
+|---|---|---|---|---|
+| `bond_and_recovery.bond_months` | 45 | 36 months | 36 – 60 | yes |
+| `notice_period.notice_months` | 152 | 3 months | 1 – 3 | yes |
+| `probation.probation_months` | 53 | 12 months | 12 – 24 | yes |
+| `bond_and_recovery.bond_amount_inr` | 29 | ₹2,00,000 | ₹55k – ₹5L | **no** (one short of 30) |
+
+The same bias applies, stated in the store: only *disputed* bonds and
+dismissals reach court.
+
+```bash
+python scripts/harvest_judgments.py --domain employment_offer --pages 5
+kwys build-norms-from-judgments --domain employment_offer
+```
+
+## Beyond the findings: what the report helps you do
+
+A report that only diagnoses leaves the reader where they started. Each of
+these is built from the same extracted figures the findings rest on, and each
+figure links back to its clause.
+
+- **Costs.** What leaving in month *m* could cost, in rupees: remaining
+  lock-in rent, notice in lieu, a bond. Overlapping lease charges are not
+  summed (they bill the same months twice). Lines that rest on a common reading
+  rather than a stated figure say "up to" and name their assumption.
+- **Dates.** Start, lock-in end, the last day to give notice, deposit due back,
+  probation and bond end, exported as a calendar file. Worked-out dates say
+  what they were worked out from; deadlines are set a day early.
+- **Negotiate.** Suggested replacement wording for each finding, from
+  templates in `kwys/negotiate.py`, with target values taken from the
+  finding's own evidence (corpus median, statutory figure, rule threshold).
+  Then one editable message to the other side. No language model.
+- **Compare.** Upload a revised draft: each key term judged better or worse
+  *for you* using the direction map, findings resolved or newly raised, and
+  clauses matched by wording rather than number (a new clause renumbers
+  everything after it).
+- **Document.** The reader's own PDF, rendered in their browser with flagged
+  clauses highlighted from the positions the reader recorded.
+- **Ask.** "Can I sublet?" answered with the clauses that cover it, ranked by
+  BM25 and the clause classifier's topics - or "this agreement does not say",
+  which is often the real finding. Nothing is generated, so an answer cannot
+  misstate the document.
+- **Share.** Optionally, the reader can add this agreement's *numbers* to a
+  second, self-reported corpus that is not drawn from disputes. They see the
+  exact payload first. Rupee amounts are rounded, free-text places are dropped,
+  and the corpus (`kwys build-norms-from-contributions`) is never merged with
+  the judgment one or used as the default.
 
 ### A negative result worth reporting
 
@@ -253,6 +314,14 @@ Contracts contain names, addresses, salaries and identity numbers. The pipeline 
 machine — no document is sent to any third party, nothing is written to disk during analysis, and no
 document content is logged. `data/raw/` and `data/gold/` are excluded from version control at the
 repository level, not by habit.
+
+The web interface keeps the same promise. The PDF viewer renders the file in
+the reader's browser; a question is sent with the clauses it is asked of,
+because the server keeps no copy to search; a salary typed into the cost
+calculator never leaves the page. The only thing ever stored is what a reader
+explicitly chooses to share: whitelisted, coarsened numbers, in
+`data/contributions/` (never committed). `KWYS_CONTRIBUTIONS=0` turns sharing
+off entirely.
 
 ## Scope and limitations
 

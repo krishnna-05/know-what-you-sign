@@ -243,6 +243,20 @@ class Finding(BaseModel):
     evidence: Evidence  # required, by design
 
 
+class ClauseTerms(BaseModel):
+    """Every figure extracted from one clause, and whose obligation it is.
+
+    Kept on the result so later stages - the cost calculator, the timeline, the
+    negotiation drafts - work from the same numbers the findings did, rather
+    than extracting them a second time and possibly differently.
+    """
+
+    clause_id: str
+    clause_type: str
+    bound: Role | None = None  # the party the clause binds, where resolvable
+    terms: list[Term] = Field(default_factory=list)
+
+
 class UnassessedTerm(BaseModel):
     """A term that was found but could not be judged either way.
 
@@ -263,6 +277,15 @@ class AnalysisResult(BaseModel):
     generated_at: datetime = Field(default_factory=datetime.now)
     warnings: list[str] = Field(default_factory=list)
     unassessed: list[UnassessedTerm] = Field(default_factory=list)
+    # What the comparison data rests on, kept apart from `warnings` so an
+    # interface can place it beside the comparisons rather than above them all.
+    corpus_bias: str | None = None
+    # For whoever runs the tool, not the reader: unbuilt norms, untrained
+    # models, unverified anchors - and the command that fixes each. The CLI
+    # prints them; the web interface never shows them.
+    diagnostics: list[str] = Field(default_factory=list)
+    # Every extracted figure, by clause; empty for terms of service.
+    extracted: list[ClauseTerms] = Field(default_factory=list)
 
     def by_severity(self, s: Severity) -> list[Finding]:
         return [f for f in self.findings if f.severity is s]

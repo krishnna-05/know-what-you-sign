@@ -62,6 +62,8 @@ class ParsedDocument:
     scanned_pages: list[int] = field(default_factory=list)
     body_size: float = 10.0  # modal font size, i.e. ordinary paragraph text
     warnings: list[str] = field(default_factory=list)
+    # Setup problems for the maintainer, not the reader (see AnalysisResult).
+    diagnostics: list[str] = field(default_factory=list)
 
     @property
     def was_ocred(self) -> bool:
@@ -207,9 +209,11 @@ def read_pdf(
             parsed.warnings.extend(ocr_warnings)
         else:
             parsed.warnings.append(
-                f"{len(scanned)} of {page_count} pages have no selectable text and "
-                f"look scanned, and OCR is not installed, so those pages were not "
-                f"read at all. Install it with: uv pip install -e '.[ocr]'"
+                f"{len(scanned)} of {page_count} pages look scanned and could not "
+                f"be read, so nothing on them was checked."
+            )
+            parsed.diagnostics.append(
+                "OCR is not installed. Install it with: uv pip install -e '.[ocr]'"
             )
 
     if strip_furniture:

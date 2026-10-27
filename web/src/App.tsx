@@ -1,41 +1,60 @@
 import { useEffect, useState } from "react";
-import { analyse, fetchConfig } from "./api";
-import { FindingCard } from "./components/FindingCard";
+import { analyse, compare, fetchConfig, type AnalyseInput } from "./api";
+import { AlertIcon, LogoMark, SpinnerIcon } from "./components/icons";
+import { Report, type Submitted } from "./components/report/Report";
 import { UploadForm, type FormState } from "./components/UploadForm";
-import type { AnalysisResult, Config } from "./types";
+import type { Config, Diff, Report as ReportData } from "./types";
 
-const DISCLAIMER =
-  "This is a triage tool, not legal advice. It tells you which clauses are " +
-  "unusual compared with other agreements — not whether they are lawful or " +
-  "enforceable. For anything that matters, ask a lawyer.";
-
-function Stat({ value, label }: { value: number | string; label: string }) {
-  return (
-    <div>
-      <div className="text-3xl font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-muted uppercase tracking-wide">{label}</div>
-    </div>
-  );
+interface Shown {
+  report: ReportData;
+  diff: Diff | null;
+  previousName: string | null;
+  file: File;
+  submitted: Submitted;
+  /** What the report was run with, so a revised draft is checked the same way. */
+  context: Omit<AnalyseInput, "file">;
 }
 
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [shown, setShown] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
+  const [comparing, setComparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchConfig()
       .then(setConfig)
-      .catch((e) => setError(`Could not reach the analyser: ${e.message}`));
+      .catch(() => setError("The service is unavailable right now. Please try again shortly."));
   }, []);
+
+  function describe(state: FormState & { file: File }): Submitted {
+    const domain = config?.domains.find((d) => d.value === state.domain);
+    const role = domain?.roles.find((r) => r.value === state.role);
+    return {
+      fileName: state.file.name,
+      domain: state.domain,
+      domainLabel: domain?.label ?? state.domain,
+      roleLabel: role?.hint ?? state.role,
+      city: state.city,
+    };
+  }
 
   async function run(state: FormState & { file: File }) {
     setBusy(true);
     setError(null);
-    setResult(null);
     try {
-      setResult(await analyse(state));
+      const report = await analyse(state);
+      const { file, ...context } = state;
+      setShown({
+        report,
+        diff: null,
+        previousName: null,
+        file,
+        submitted: describe(state),
+        context,
+      });
+      window.scrollTo({ top: 0 });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -43,130 +62,99 @@ export default function App() {
     }
   }
 
-  const high = result?.findings.filter((f) => f.severity === "high").length ?? 0;
-  const medium = result?.findings.filter((f) => f.severity === "medium").length ?? 0;
+  async function runCompare(newFile: File) {
+    if (!shown) return;
+    setComparing(true);
+    setError(null);
+    try {
+      const { report, diff } = await compare(shown.context, shown.file, newFile);
+      setShown({
+        ...shown,
+        report,
+        diff,
+        previousName: shown.submitted.fileName,
+        file: newFile,
+        submitted: { ...shown.submitted, fileName: newFile.name },
+      });
+      window.scrollTo({ top: 0 });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setComparing(false);
+    }
+  }
 
   return (
-    <div className="min-h-dvh">
-      <main className="max-w-3xl mx-auto px-4 py-10 sm:py-14">
-        <header className="mb-8">
-          <h1 className="text-2xl font-semibold m-0">Know What You Sign</h1>
-          <p className="text-ink-2 mt-2 mb-0 max-w-prose">
-            Upload an agreement. This tells you which clauses are unusual
-            compared with other agreements — and which questions to ask before
-            you sign.
-          </p>
-        </header>
+    <div className="min-h-dvh flex flex-col">
+      <header className="no-print border-b border-line bg-card/80 backdrop-blur sticky top-0 z-10">
+        <div className="max-w-3xl mx-auto px-4 h-14 flex items-center">
+          <button
+            type="button"
+            onClick={() => setShown(null)}
+            className="flex items-center gap-2.5 bg-transparent border-0 p-0 cursor-pointer text-ink"
+          >
+            <LogoMark />
+            <span className="font-semibold tracking-tight">Know What You Sign</span>
+          </button>
+        </div>
+      </header>
 
+      <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-10 sm:py-14">
         {error && (
-          <p className="border border-critical text-critical rounded-lg px-4 py-3 mb-6 text-sm">
+          <div
+            role="alert"
+            className="flex gap-3 rounded-xl border border-critical/30 bg-critical/6 px-4 py-3 mb-6 text-sm text-critical"
+          >
+            <AlertIcon className="size-4 shrink-0 mt-0.5" />
             {error}
-          </p>
+          </div>
         )}
 
-        {!config && !error && <p className="text-muted">Starting up…</p>}
+        {!config && !error && (
+          <div className="flex justify-center py-24 text-muted">
+            <SpinnerIcon className="size-6" />
+          </div>
+        )}
 
-        {config && <UploadForm config={config} busy={busy} onSubmit={run} />}
-
-        {result && (
-          <section className="mt-10">
-            <div className="flex gap-10 border-b border-line pb-6 mb-6">
-              <Stat value={result.clausesChecked} label="clauses checked" />
-              <Stat value={high} label="need attention" />
-              <Stat value={medium} label="worth a look" />
-            </div>
-
-            <p className="text-xs text-muted -mt-3 mb-5">
-              {result.pageCount} page{result.pageCount === 1 ? "" : "s"}
-              {result.wasOcred &&
-                " · read from a scan, so check each quoted figure against your copy"}
-              {result.corpusLabel &&
-                ` · compared against ${result.corpusLabel.toLowerCase()}`}
-            </p>
-
-            {result.warnings.map((w) => (
-              <p
-                key={w}
-                className="text-sm text-ink-2 border-l-2 border-serious bg-card px-3 py-2 rounded-r mb-3"
-              >
-                {w}
+        {/* Kept mounted behind the report, so "New check" returns to the same
+            inputs - checking the other side of the same agreement is common. */}
+        {config && (
+          <div hidden={!!shown}>
+            <div className="mb-8">
+              <h1 className="m-0 text-3xl sm:text-[2rem] font-semibold tracking-tight">
+                Check an agreement before you sign
+              </h1>
+              <p className="text-ink-2 mt-2 mb-0">
+                Find unusual or one-sided clauses, and what to ask about them.
               </p>
-            ))}
-
-            {result.findings.length === 0 ? (
-              <div className="bg-card border border-line rounded-xl p-5">
-                <p className="m-0 font-medium">Nothing stood out.</p>
-                <p className="text-sm text-muted mt-2 mb-0">
-                  That is not the same as saying this contract is fine — only
-                  that nothing fell outside the range this tool can check.
-                </p>
-              </div>
-            ) : (
-              result.findings.map((f, i) => (
-                <FindingCard
-                  key={`${f.clauseId}-${i}`}
-                  finding={f}
-                  index={i + 1}
-                  distribution={
-                    f.evidence.field
-                      ? result.distributions[f.evidence.field]
-                      : undefined
-                  }
-                />
-              ))
-            )}
-
-            {(result.notChecked?.length ?? 0) > 0 && (
-              <div className="border border-line rounded-xl p-5 mt-6">
-                <p className="m-0 font-medium">Found, but not checked</p>
-                <p className="text-sm text-muted mt-1 mb-3">
-                  There is no comparison data, law or rule for these yet, so
-                  this report cannot say whether they are fair. Read them
-                  yourself.
-                </p>
-                <ul className="m-0 pl-5 text-sm text-ink-2">
-                  {result.notChecked!.map((u) => (
-                    <li key={`${u.clauseId}-${u.label}`}>
-                      {u.label}: {u.value}{" "}
-                      <span className="text-muted">(clause {u.clauseId})</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <p className="text-xs text-muted border-t border-line pt-5 mt-8">
-              {DISCLAIMER}
-            </p>
-          </section>
+            </div>
+            <UploadForm config={config} busy={busy} onSubmit={run} />
+          </div>
         )}
 
-        {config && !result && (
-          <aside className="mt-10 text-sm text-muted">
-            <p className="mb-1">
-              <strong className="text-ink-2">How it works.</strong> It compares
-              each clause against what is normal across a body of real
-              agreements. A term far outside that range is objectively unusual,
-              and every flag shows the evidence behind it.
-            </p>
-            <p className="mb-1">
-              It does not decide whether a clause is legal or enforceable, and
-              it is not a substitute for a lawyer.
-            </p>
-            <p className="m-0">
-              Clauses are recognised by{" "}
-              {config.capabilities.clauseClassifier === "trained"
-                ? "a trained model"
-                : "keyword rules"}
-              ; unfair terms-of-service clauses by{" "}
-              {config.capabilities.unfairDetector === "trained"
-                ? "a model trained on expert annotations"
-                : "keyword rules, which miss a good share of what an expert would flag"}
-              .
-            </p>
-          </aside>
+        {shown && (
+          <Report
+            // A new report (or a new draft) starts on its own first tab.
+            key={`${shown.submitted.fileName}-${shown.previousName ?? ""}`}
+            report={shown.report}
+            diff={shown.diff}
+            previousName={shown.previousName}
+            file={shown.file}
+            submitted={shown.submitted}
+            comparing={comparing}
+            onBack={() => setShown(null)}
+            onCompare={runCompare}
+          />
         )}
       </main>
+
+      <footer className="border-t border-line">
+        <p className="max-w-3xl mx-auto px-4 py-5 m-0 text-xs text-muted">
+          Flags unusual terms by comparison with other agreements. It does not
+          assess whether a clause is lawful or enforceable, and is not legal
+          advice.
+        </p>
+      </footer>
     </div>
   );
 }

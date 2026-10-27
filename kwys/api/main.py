@@ -1,7 +1,9 @@
 """HTTP API behind the React interface.
 
-Two endpoints: one describes what the system can currently do, one analyses a
-document. Everything else the interface needs is derived from those.
+One endpoint describes what the system can currently do; one analyses a
+document, another compares two drafts of one. Questions and shared figures
+have their own endpoints, and neither keeps the document: a question arrives
+with the clauses it is asked of, and a shared figure is a number, not text.
 
 PRIVACY. An uploaded agreement carries names, addresses, salaries and identity
 numbers. It is written to a temporary file only because the PDF reader needs a
@@ -20,12 +22,20 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from kwys import config as C
+from kwys.ask import AskClause, answer
 from kwys.asymmetry.parties import DOMAIN_ROLES
-from kwys.models import Domain, Role
+from kwys.compare import compare
+from kwys.contribute import ContributionStore, Rejected, clean, offer
+from kwys.exposure import build_exposure
+from kwys.facts import gather
+from kwys.models import AnalysisResult, Domain, Role
+from kwys.negotiate import label_for, suggest
 from kwys.norms.store import NormStore, available_versions, display_label, is_synthetic
 from kwys.pipeline import DATA_ROOT, analyse
+from kwys.timeline import build_timeline
 
 log = logging.getLogger(__name__)
 
@@ -134,20 +144,14 @@ def get_config() -> dict[str, Any]:
             "ocr": ocr_available(),
             "clauseClassifier": active_classifier(),
             "unfairDetector": active_detector(),
+            "contributions": contributions_enabled(),
         },
     }
 
 
-@app.post("/api/analyse")
-async def post_analyse(
-    file: UploadFile = File(...),
-    role: str = Form(...),
-    domain: str = Form(...),
-    corpus_version: str | None = Form(None),
-    city: str | None = Form(None),
-    state: str | None = Form(None),
-) -> JSONResponse:
-    """Analyse one uploaded agreement."""
+def _check_inputs(
+    role: str, domain: str, corpus_version: str | None
+) -> tuple[Role, Domain]:
     try:
         role_enum, domain_enum = Role(role), Domain(domain)
     except ValueError as exc:
@@ -167,7 +171,10 @@ async def post_analyse(
             status_code=400,
             detail=f"No reference corpus called {corpus_version!r} is built for {domain}.",
         )
+    return role_enum, domain_enum
 
+
+async def _read_pdf(file: UploadFile) -> bytes:
     # Read one byte past the cap rather than the whole body, so an oversized
     # upload is refused without first being held in memory in full.
     payload = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -180,48 +187,190 @@ async def post_analyse(
         )
     if not payload.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="That does not look like a PDF.")
+    return payload
 
+
+def _analyse_bytes(
+    payload: bytes,
+    role: Role,
+    domain: Domain,
+    city: str | None,
+    state: str | None,
+    corpus_version: str | None,
+) -> AnalysisResult:
     # delete=True: the document must not outlive the request, and must never
     # land anywhere backed up or synced.
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp:
         tmp.write(payload)
         tmp.flush()
         try:
-            result = analyse(
+            return analyse(
                 tmp.name,
-                role=role_enum,
-                domain=domain_enum,
+                role=role,
+                domain=domain,
                 user_city=city or None,
                 user_state=state or None,
                 corpus_version=corpus_version or None,
             )
         except Exception as exc:  # noqa: BLE001 - surface a message, not a stack
+            # The exception goes to the server log only: its text is internal
+            # and can quote the document, and neither belongs in front of the
+            # reader.
             log.exception("analysis failed")
             raise HTTPException(
-                status_code=500, detail=f"Could not analyse that document: {exc}"
+                status_code=500,
+                detail="This document could not be analysed. Check that it is a "
+                "readable PDF and try again.",
             ) from exc
 
+
+def _report_json(
+    result: AnalysisResult, role: Role, domain: Domain, city: str | None
+) -> dict[str, Any]:
+    """The whole report: findings, plus everything the other tabs are built from."""
     corpus_label = None
     if result.corpus_version:
         corpus_label = display_label(
-            NormStore.load(DATA_ROOT / "norms", domain_enum.value, result.corpus_version)
+            NormStore.load(DATA_ROOT / "norms", domain.value, result.corpus_version)
         )
 
+    facts = gather(result, role)
+    return {
+        "clausesChecked": result.clauses_checked,
+        "corpusLabel": corpus_label,
+        "corpusBias": result.corpus_bias,
+        "wasOcred": result.document.was_ocred,
+        "pageCount": result.document.page_count,
+        # Reader-facing caveats only. `result.diagnostics` - unbuilt norms,
+        # untrained models and the commands that fix them - is for whoever
+        # runs the server, and stays in the CLI.
+        "warnings": result.warnings,
+        "findings": [
+            {
+                **_finding_json(f),
+                "label": label_for(f),
+                "suggestedWording": suggest(f, facts, domain, role, city or None),
+            }
+            for f in result.findings
+        ],
+        "notChecked": [
+            {"clauseId": u.clause_id, "label": u.label, "value": u.value}
+            for u in result.unassessed
+        ],
+        "distributions": _distributions(result, domain),
+        "clauses": [
+            {
+                "id": c.id,
+                "type": c.clause_type,
+                "typeLabel": C.display_name(c.clause_type) if c.clause_type else None,
+                "heading": c.heading or c.parent_heading,
+                "text": c.text,
+                "spans": [s.model_dump() for s in c.spans],
+            }
+            for c in result.document.clauses
+        ],
+        "facts": facts.to_json(),
+        "exposure": build_exposure(facts, domain, role),
+        "timeline": build_timeline(facts, domain),
+        # Figures the reader may choose to share. Offered, never sent: the
+        # browser posts them only after the reader has seen them and agreed.
+        "shareable": offer(domain, result.extracted, city) if contributions_enabled() else [],
+    }
+
+
+@app.post("/api/analyse")
+async def post_analyse(
+    file: UploadFile = File(...),
+    role: str = Form(...),
+    domain: str = Form(...),
+    corpus_version: str | None = Form(None),
+    city: str | None = Form(None),
+    state: str | None = Form(None),
+) -> JSONResponse:
+    """Analyse one uploaded agreement."""
+    role_enum, domain_enum = _check_inputs(role, domain, corpus_version)
+    payload = await _read_pdf(file)
+    result = _analyse_bytes(payload, role_enum, domain_enum, city, state, corpus_version)
+    return JSONResponse(_report_json(result, role_enum, domain_enum, city))
+
+
+@app.post("/api/compare")
+async def post_compare(
+    old_file: UploadFile = File(...),
+    new_file: UploadFile = File(...),
+    role: str = Form(...),
+    domain: str = Form(...),
+    corpus_version: str | None = Form(None),
+    city: str | None = Form(None),
+    state: str | None = Form(None),
+) -> JSONResponse:
+    """Two drafts of one agreement: the new one's report, and what changed."""
+    role_enum, domain_enum = _check_inputs(role, domain, corpus_version)
+    old_bytes = await _read_pdf(old_file)
+    new_bytes = await _read_pdf(new_file)
+    old = _analyse_bytes(old_bytes, role_enum, domain_enum, city, state, corpus_version)
+    new = _analyse_bytes(new_bytes, role_enum, domain_enum, city, state, corpus_version)
+    diff = compare(old, new, gather(old, role_enum), gather(new, role_enum), role_enum)
     return JSONResponse(
-        {
-            "clausesChecked": result.clauses_checked,
-            "corpusLabel": corpus_label,
-            "wasOcred": result.document.was_ocred,
-            "pageCount": result.document.page_count,
-            "warnings": result.warnings,
-            "findings": [_finding_json(f) for f in result.findings],
-            "notChecked": [
-                {"clauseId": u.clause_id, "label": u.label, "value": u.value}
-                for u in result.unassessed
-            ],
-            "distributions": _distributions(result, domain_enum),
-        }
+        {"report": _report_json(new, role_enum, domain_enum, city), "diff": diff}
     )
+
+
+class AskClauseIn(BaseModel):
+    id: str = Field(max_length=40)
+    text: str = Field(max_length=20_000)
+    type: str | None = Field(default=None, max_length=60)
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=2, max_length=300)
+    domain: Domain
+    # The clauses travel with the question because nothing is kept between
+    # requests: the server has no copy of the document to search.
+    clauses: list[AskClauseIn] = Field(max_length=1_000)
+
+
+@app.post("/api/ask")
+def post_ask(body: AskIn) -> dict[str, Any]:
+    """Answer a question with the agreement's own clauses, or report silence."""
+    return answer(
+        body.question,
+        [AskClause(c.id, c.text, c.type) for c in body.clauses],
+        body.domain,
+    )
+
+
+def contributions_enabled() -> bool:
+    """On unless switched off (KWYS_CONTRIBUTIONS=0) - sharing is still opt-in per report."""
+    return os.environ.get("KWYS_CONTRIBUTIONS", "1") != "0"
+
+
+def _contribution_store() -> ContributionStore:
+    return ContributionStore(DATA_ROOT / "contributions" / "contributions.sqlite")
+
+
+class FigureIn(BaseModel):
+    key: str = Field(max_length=80)
+    value: float
+
+
+class ContributeIn(BaseModel):
+    domain: str = Field(max_length=40)
+    city: str | None = Field(default=None, max_length=60)
+    figures: list[FigureIn] = Field(max_length=20)
+
+
+@app.post("/api/contribute")
+def post_contribute(body: ContributeIn) -> dict[str, Any]:
+    """Store figures a reader chose to share. Numbers only; see kwys.contribute."""
+    if not contributions_enabled():
+        raise HTTPException(status_code=404, detail="Sharing is not enabled on this server.")
+    try:
+        cleaned = clean(body.domain, [f.model_dump() for f in body.figures], body.city)
+    except Rejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    stored = _contribution_store().add(cleaned)
+    return {"stored": stored, "duplicate": not stored}
 
 
 def _finding_json(f) -> dict[str, Any]:

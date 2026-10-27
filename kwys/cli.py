@@ -125,6 +125,8 @@ def segment(
         )
     for w in parsed.warnings:
         console.print(f"[yellow]![/yellow] {w}")
+    for d in parsed.diagnostics:
+        console.print(f"[dim]setup: {d}[/dim]")
 
 
 @app.command("build-norms")
@@ -182,9 +184,10 @@ def build_norms(
 
 @app.command("build-norms-from-judgments")
 def build_norms_from_judgments(
-    values: Annotated[Path, typer.Option(help="values.jsonl from harvest_judgments.py")] = (
-        DATA / "corpus" / "judgments" / "values.jsonl"
-    ),
+    values: Annotated[
+        Path | None,
+        typer.Option(help="values.jsonl from harvest_judgments.py (default: by domain)"),
+    ] = None,
     domain: Annotated[Domain, typer.Option()] = Domain.RESIDENTIAL_LEASE,
     version: Annotated[str, typer.Option()] = "judgments-v1",
     residential_only: Annotated[bool, typer.Option(help="drop non-residential judgments.")] = False,
@@ -199,6 +202,10 @@ def build_norms_from_judgments(
     """
     from scripts.build_norms import build_from_judgments
 
+    if values is None:
+        values = DATA / "corpus" / "judgments" / (
+            "employment/values.jsonl" if domain is Domain.EMPLOYMENT_OFFER else "values.jsonl"
+        )
     if not values.exists():
         console.print(
             f"[red]No harvested values at {values}.[/red]\n"
@@ -230,6 +237,38 @@ def build_norms_from_judgments(
             f"{norm.quantile(0.25):g}-{norm.quantile(0.75):g}",
         )
     console.print(table)
+    console.print(f"[yellow]{store.corpus_bias}[/yellow]")
+
+
+@app.command("build-norms-from-contributions")
+def build_norms_from_contributions(
+    domain: Annotated[Domain, typer.Option()] = Domain.RESIDENTIAL_LEASE,
+    db: Annotated[Path, typer.Option(help="the contributions database")] = (
+        DATA / "contributions" / "contributions.sqlite"
+    ),
+    out: Annotated[Path, typer.Option()] = DATA / "norms",
+) -> None:
+    """Build a separate corpus from figures readers chose to share.
+
+    Never merged into the judgment corpus: it is self-reported and unverified,
+    and every report built on it says so.
+    """
+    from kwys.contribute import ContributionStore, build_store
+    from kwys.norms.store import MIN_N
+
+    if not db.exists():
+        console.print(f"[red]No contributions yet at {db}.[/red]")
+        raise typer.Exit(1)
+    store = build_store(ContributionStore(db), domain)
+    if store.is_empty:
+        console.print(f"[red]No contributions for {domain.value}.[/red]")
+        raise typer.Exit(1)
+    store.save(out)
+    for key, info in store.coverage().items():
+        mark = (
+            "[green]usable[/green]" if info["sufficient"] else f"[yellow]thin (n<{MIN_N})[/yellow]"
+        )
+        console.print(f"  {key}  n={info['n']}  {mark}")
     console.print(f"[yellow]{store.corpus_bias}[/yellow]")
 
 

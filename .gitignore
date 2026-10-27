@@ -15,6 +15,8 @@ data/corpus/**
 # stays out - it is large and refetchable.
 !data/corpus/judgments/
 !data/corpus/judgments/values.jsonl
+!data/corpus/judgments/employment/
+!data/corpus/judgments/employment/values.jsonl
 
 # built artefacts - all regenerable, none belong in git
 # norms: rebuild with `kwys build-norms` (or scripts/make_demo_norms.py)
@@ -79,3 +81,6 @@ web/tsconfig.tsbuildinfo
 # trained models and their checkpoints - regenerable with
 # scripts/train_classifier.py, and hundreds of MB
 data/models/
+
+# Opt-in contributed figures: numbers only, but still never committed.
+data/contributions/

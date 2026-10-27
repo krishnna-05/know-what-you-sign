@@ -9,11 +9,13 @@ Usage
   python scripts/harvest_judgments.py --pages 5
   python scripts/harvest_judgments.py --pages 10 --residential-only
   python scripts/harvest_judgments.py --report          # inspect what was found
+  python scripts/harvest_judgments.py --domain employment_offer --pages 5
 
 Output
 ------
   data/corpus/judgments/values.jsonl   one record per harvested figure, each
                                        carrying the judgment it came from
+  data/corpus/judgments/employment/values.jsonl   the same, for employment
   data/corpus/judgments/cache/         raw pages, so re-runs cost no requests
 """
 
@@ -26,6 +28,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from kwys.harvest.judgments import (
+    EMPLOYMENT_BOUNDS,
+    EMPLOYMENT_PATTERNS,
     Fetcher,
     classify_property,
     derive_deposit_ratio,
@@ -39,6 +43,8 @@ log = logging.getLogger("harvest")
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "data" / "corpus" / "judgments"
+CACHE_DIR = OUT_DIR / "cache"  # shared: a page fetched once is never fetched again
+EMPLOYMENT_OUT_DIR = OUT_DIR / "employment"
 
 # Several angles on the same population: a single query returns one slice of
 # the index and would give a narrower corpus than the case law actually holds.
@@ -53,13 +59,28 @@ QUERIES = [
 ]
 
 
-def harvest(pages: int, residential_only: bool, refresh: bool) -> dict:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    fetcher = Fetcher(OUT_DIR / "cache")
+# Disputes over a service bond or a dismissal recite the appointment letter:
+# the bond amount and period, the notice each side must give, the probation.
+EMPLOYMENT_QUERIES = [
+    '"service bond" employee resigned "liquidated damages"',
+    '"employment bond" employee training recovery',
+    '"service bond" "serve the company" years',
+    'bond "restraint of trade" "section 27" employee resign',
+    '"appointment letter" "probation period" "notice period" employee',
+    'employee bond amount recovery suit employer training',
+    '"three months notice" "appointment letter" termination employee',
+]
+
+
+def harvest(pages: int, residential_only: bool, refresh: bool, domain: str) -> dict:
+    employment = domain == "employment_offer"
+    out_dir = EMPLOYMENT_OUT_DIR if employment else OUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fetcher = Fetcher(CACHE_DIR)
 
     doc_ids: list[str] = []
     seen: set[str] = set()
-    for query in QUERIES:
+    for query in EMPLOYMENT_QUERIES if employment else QUERIES:
         for page in range(pages):
             found = search(fetcher, query, page)
             if not found:
@@ -80,16 +101,20 @@ def harvest(pages: int, residential_only: bool, refresh: bool) -> dict:
             stats["unfetchable"] += 1
             continue
 
-        prop_type = classify_property(judgment.text)
-        stats[f"property:{prop_type}"] += 1
-        if residential_only and prop_type != "residential":
-            stats["skipped_non_residential"] += 1
-            continue
+        if employment:
+            prop_type = "employment"
+            values = extract_values(judgment, EMPLOYMENT_PATTERNS, EMPLOYMENT_BOUNDS)
+        else:
+            prop_type = classify_property(judgment.text)
+            stats[f"property:{prop_type}"] += 1
+            if residential_only and prop_type != "residential":
+                stats["skipped_non_residential"] += 1
+                continue
 
-        values = extract_values(judgment)
-        ratio = derive_deposit_ratio(values)
-        if ratio:
-            values.append(ratio)
+            values = extract_values(judgment)
+            ratio = derive_deposit_ratio(values)
+            if ratio:
+                values.append(ratio)
         if not values:
             stats["no_values"] += 1
             continue
@@ -113,7 +138,7 @@ def harvest(pages: int, residential_only: bool, refresh: bool) -> dict:
         if i % 25 == 0:
             log.info("  %d/%d judgments, %d values", i, len(doc_ids), len(records))
 
-    out = OUT_DIR / "values.jsonl"
+    out = out_dir / "values.jsonl"
     with out.open("w") as fh:
         for r in records:
             fh.write(json.dumps(r) + "\n")
@@ -123,8 +148,8 @@ def harvest(pages: int, residential_only: bool, refresh: bool) -> dict:
     return dict(stats)
 
 
-def report() -> None:
-    path = OUT_DIR / "values.jsonl"
+def report(domain: str) -> None:
+    path = (EMPLOYMENT_OUT_DIR if domain == "employment_offer" else OUT_DIR) / "values.jsonl"
     if not path.exists():
         raise SystemExit(f"Nothing harvested yet. Run without --report first. ({path})")
 
@@ -162,17 +187,19 @@ def main() -> int:
                     help="drop judgments that read as commercial or industrial")
     ap.add_argument("--refresh", action="store_true", help="ignore the page cache")
     ap.add_argument("--report", action="store_true", help="summarise what was harvested")
+    ap.add_argument("--domain", default="residential_lease",
+                    choices=["residential_lease", "employment_offer"])
     args = ap.parse_args()
 
     if args.report:
-        report()
+        report(args.domain)
         return 0
 
-    stats = harvest(args.pages, args.residential_only, args.refresh)
+    stats = harvest(args.pages, args.residential_only, args.refresh, args.domain)
     print("\n" + json.dumps(stats, indent=2, sort_keys=True))
     print(
         "\nRemember: only DISPUTED agreements reach court, so this corpus "
-        "over-represents conflict-prone tenancies. State that in any write-up."
+        "over-represents conflict-prone agreements. State that in any write-up."
     )
     return 0
 

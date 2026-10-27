@@ -133,6 +133,20 @@ FIELD_TO_KEY = {
     # cities, whereas "four months' rent" travels.
 }
 
+EMPLOYMENT_BIAS = (
+    "Built from terms recited in published court judgments. Only DISPUTED "
+    "bonds and dismissals reach court, so this corpus over-represents "
+    "conflict-prone employers and probably harsher-than-average terms. Treat "
+    "percentiles as indicative of litigated employment, not of the job market."
+)
+
+EMPLOYMENT_FIELD_TO_KEY = {
+    "bond_months": "bond_and_recovery.bond_months",
+    "bond_amount_inr": "bond_and_recovery.bond_amount_inr",
+    "notice_months": "notice_period.notice_months",
+    "probation_months": "probation.probation_months",
+}
+
 
 def build_from_judgments(
     values_path: Path | str,
@@ -147,10 +161,12 @@ def build_from_judgments(
     three times must not weigh three times as much as one that states it once.
     """
     values_path = Path(values_path)
+    employment = domain is Domain.EMPLOYMENT_OFFER
+    field_to_key = EMPLOYMENT_FIELD_TO_KEY if employment else FIELD_TO_KEY
     store = NormStore(
         domain=domain.value,
         version=version,
-        corpus_bias=JUDGMENT_BIAS,
+        corpus_bias=EMPLOYMENT_BIAS if employment else JUDGMENT_BIAS,
         label="Real agreements, from court cases",
     )
     stats: dict[str, Any] = {"records": 0, "used": 0, "judgments": set(), "skipped": {}}
@@ -164,7 +180,7 @@ def build_from_judgments(
             rec = json.loads(line)
             stats["records"] += 1
 
-            key = FIELD_TO_KEY.get(rec["field"])
+            key = field_to_key.get(rec["field"])
             if key is None:
                 stats["skipped"]["not_a_norm_field"] = (
                     stats["skipped"].get("not_a_norm_field", 0) + 1
@@ -179,7 +195,7 @@ def build_from_judgments(
             best.setdefault((rec["doc_id"], rec["field"]), rec)
 
     for (doc_id, field_name), rec in best.items():
-        key = FIELD_TO_KEY[field_name]
+        key = field_to_key[field_name]
         store.add(key, float(rec["value"]), rec["unit"], source=f"judgment:{doc_id}")
         stats["used"] += 1
         stats["judgments"].add(doc_id)

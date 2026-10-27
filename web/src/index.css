@@ -1,50 +1,62 @@
 @import "tailwindcss";
 
 /* Tokens, defined once and redefined for dark mode rather than flipped
-   automatically: dark is a selected set of steps, not an inversion. Values are
-   the validated instance from the design system - the chart pair (context gray
-   vs yours red) separates at CVD delta-E 9.1 and both clear 3:1 on either
+   automatically: dark is a selected set of steps, not an inversion. The chart
+   pair (context gray vs yours red) is the validated instance from the design
+   system - it separates at CVD delta-E 9.1 and both clear 3:1 on either
    surface. */
 :root {
-  --surface:      #fcfcfb;
+  --surface:      #f7f7f5;
   --surface-card: #ffffff;
-  --ink:          #0b0b0b;
-  --ink-2:        #52514e;
-  --ink-muted:    #898781;
-  --line:         #e1e0d9;
-  --accent:       #2a78d6;
+  --surface-2:    #f2f2ef;
+  --ink:          #111214;
+  --ink-2:        #4a4a47;
+  --ink-muted:    #7d7c77;
+  --line:         #e4e3dd;
+  --line-strong:  #cfcec7;
+  --accent:       #1f5fc4;
+  --accent-ink:   #ffffff;
   --serious:      #8a6100;
   --critical:     #b3261e;
+  --good:         #1d7a46;
   --chart-ctx:    #898781;
   --chart-yours:  #d03b3b;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --surface:      #16171a;
-    --surface-card: #1e2024;
-    --ink:          #ffffff;
+    --surface:      #121316;
+    --surface-card: #1a1c20;
+    --surface-2:    #212328;
+    --ink:          #f4f4f2;
     --ink-2:        #c3c2b7;
-    --ink-muted:    #898781;
-    --line:         #2c2c2a;
+    --ink-muted:    #8f8e88;
+    --line:         #2b2d31;
+    --line-strong:  #3a3c41;
     --accent:       #7aa9e8;
+    --accent-ink:   #0b1220;
     --serious:      #e8c46a;
     --critical:     #f2b8b5;
+    --good:         #7dd3a0;
     --chart-ctx:    #898781;
     --chart-yours:  #d03b3b;
   }
 }
 
 :root[data-theme="dark"] {
-  --surface:      #16171a;
-  --surface-card: #1e2024;
-  --ink:          #ffffff;
+  --surface:      #121316;
+  --surface-card: #1a1c20;
+  --surface-2:    #212328;
+  --ink:          #f4f4f2;
   --ink-2:        #c3c2b7;
-  --ink-muted:    #898781;
-  --line:         #2c2c2a;
+  --ink-muted:    #8f8e88;
+  --line:         #2b2d31;
+  --line-strong:  #3a3c41;
   --accent:       #7aa9e8;
+  --accent-ink:   #0b1220;
   --serious:      #e8c46a;
   --critical:     #f2b8b5;
+  --good:         #7dd3a0;
   --chart-ctx:    #898781;
   --chart-yours:  #d03b3b;
 }
@@ -63,18 +75,39 @@ body {
 @theme inline {
   --color-surface: var(--surface);
   --color-card: var(--surface-card);
+  --color-surface-2: var(--surface-2);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-muted: var(--ink-muted);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
   --color-serious: var(--serious);
   --color-critical: var(--critical);
+  --color-good: var(--good);
 }
 
 /* Focus that is visible on either surface, for keyboard users. */
 :where(button, a, input, select, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 6px;
+}
+
+/* A native select, restyled to match the inputs, with its own chevron. */
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237d7c77' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+  padding-right: 2.5rem;
+}
+
+/* The report is something people take to the other party: print it clean. */
+@media print {
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  article { break-inside: avoid; }
 }

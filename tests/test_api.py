@@ -138,6 +138,40 @@ def test_oversized_upload_is_refused(client, monkeypatch):
     assert r.status_code == 413
 
 
+def _post_bytes(client: TestClient, payload: bytes):
+    return client.post(
+        "/api/analyse",
+        files={"file": ("lease.pdf", payload, "application/octet-stream")},
+        data={"role": "tenant", "domain": LEASE},
+    )
+
+
+def test_compressed_upload_gives_the_same_report(client):
+    from tests.test_compress import kwz
+
+    plain = _post(client).json()
+    packed = _post_bytes(client, kwz(FIXTURE.read_bytes()))
+    assert packed.status_code == 200, packed.text
+    assert packed.json()["findings"] == plain["findings"]
+
+
+def test_damaged_compressed_upload_is_refused(client):
+    from tests.test_compress import kwz
+
+    r = _post_bytes(client, kwz(FIXTURE.read_bytes(), crc=0))
+    assert r.status_code == 400
+    assert "damaged" in r.json()["detail"]
+
+
+def test_compressed_upload_too_large_once_unpacked_is_refused(client, monkeypatch):
+    from tests.test_compress import kwz
+
+    monkeypatch.setattr(api, "MAX_PDF_BYTES", 1000)
+    r = _post_bytes(client, kwz(FIXTURE.read_bytes()))
+    assert r.status_code == 413
+    assert "Uncompressed" in r.json()["detail"]
+
+
 def test_every_charted_finding_has_its_distribution(client):
     body = _post(client, corpus_version="real-v1").json()
     for f in body["findings"]:

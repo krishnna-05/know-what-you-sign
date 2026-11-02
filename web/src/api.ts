@@ -1,3 +1,4 @@
+import { forUpload, MAX_UPLOAD_MB } from "./compress";
 import type { AskResult, Clause, Config, Diff, Report } from "./types";
 
 /** Anything the server refused, with the reason it gave. */
@@ -37,9 +38,18 @@ function contextFields(form: FormData, input: Omit<AnalyseInput, "file">) {
   if (input.state) form.append("state", input.state);
 }
 
-export function analyse(input: AnalyseInput): Promise<Report> {
+/** The file, compressed if that helps, refused here if it is still over the limit. */
+async function prepare(file: File): Promise<Blob> {
+  const body = await forUpload(file);
+  if (body.size > MAX_UPLOAD_MB * 1024 * 1024) {
+    throw new ApiError(`Even compressed, ${file.name} is larger than ${MAX_UPLOAD_MB} MB.`);
+  }
+  return body;
+}
+
+export async function analyse(input: AnalyseInput): Promise<Report> {
   const form = new FormData();
-  form.append("file", input.file);
+  form.append("file", await prepare(input.file), input.file.name);
   contextFields(form, input);
   return fetch("/api/analyse", { method: "POST", body: form }).then((r) =>
     unwrap<Report>(r),
@@ -47,14 +57,15 @@ export function analyse(input: AnalyseInput): Promise<Report> {
 }
 
 /** Two drafts of one agreement: the new draft's report, and what changed. */
-export function compare(
+export async function compare(
   input: Omit<AnalyseInput, "file">,
   oldFile: File,
   newFile: File,
 ): Promise<{ report: Report; diff: Diff }> {
+  const [oldBody, newBody] = await Promise.all([prepare(oldFile), prepare(newFile)]);
   const form = new FormData();
-  form.append("old_file", oldFile);
-  form.append("new_file", newFile);
+  form.append("old_file", oldBody, oldFile.name);
+  form.append("new_file", newBody, newFile.name);
   contextFields(form, input);
   return fetch("/api/compare", { method: "POST", body: form }).then((r) =>
     unwrap<{ report: Report; diff: Diff }>(r),

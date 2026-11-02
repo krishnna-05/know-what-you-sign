@@ -21,6 +21,12 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # The upload tests run the browser's TypeScript encoder and check the
+      # server decodes its output; Node 22 runs TypeScript directly.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       # Core plus the HTTP layer. The ml/ocr extras pull ~2 GB of torch and
       # model weights for tests that are deselected here anyway - the fast
       # suite covers parsing, extraction, statistics, scoring, config and the
@@ -50,6 +56,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run build
+      - run: npm test
 
   # The slow suite needs OCR models. Run it on demand rather than on every push.
   slow:

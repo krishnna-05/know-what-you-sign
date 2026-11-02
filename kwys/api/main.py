@@ -28,6 +28,7 @@ from kwys import config as C
 from kwys.ask import AskClause, answer
 from kwys.asymmetry.parties import DOMAIN_ROLES
 from kwys.compare import compare
+from kwys.compress import InflateError, TooLarge, is_packed, unpack
 from kwys.contribute import ContributionStore, Rejected, clean, offer
 from kwys.exposure import build_exposure
 from kwys.facts import gather
@@ -42,6 +43,11 @@ log = logging.getLogger(__name__)
 # 25 MB. A scanned forty-page agreement is a few megabytes; anything far larger
 # is a mistake or an attack, and OCR on it would tie up the process for minutes.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+# The cap on the PDF itself once a compressed upload is unpacked. Scans stored
+# as raw page images run to ~5.5 MB a page, so this admits ~18 such pages,
+# which compress to well under the upload cap.
+MAX_PDF_BYTES = 100 * 1024 * 1024
 
 app = FastAPI(title="Know What You Sign", version="0.1.0")
 
@@ -185,6 +191,20 @@ async def _read_pdf(file: UploadFile) -> bytes:
             status_code=413,
             detail=f"That file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
         )
+    if is_packed(payload):
+        try:
+            payload = unpack(payload, MAX_PDF_BYTES)
+        except TooLarge as exc:
+            limit = MAX_PDF_BYTES // (1024 * 1024)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Uncompressed, that file is larger than {limit} MB.",
+            ) from exc
+        except InflateError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="The upload arrived damaged. Try sending it again.",
+            ) from exc
     if not payload.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="That does not look like a PDF.")
     return payload

@@ -1,9 +1,7 @@
 import { useRef, useState } from "react";
+import { MAX_PDF_MB, MAX_UPLOAD_MB } from "../compress";
 import type { Config, DomainOption } from "../types";
 import { FileIcon, LockIcon, SpinnerIcon, UploadIcon } from "./icons";
-
-// Mirrors MAX_UPLOAD_BYTES in kwys/api/main.py.
-const MAX_UPLOAD_MB = 25;
 
 export interface FormState {
   domain: string;
@@ -68,9 +66,11 @@ export function UploadForm({
       setFileError(`${f.name} is not a PDF.`);
       return;
     }
-    if (f && f.size > MAX_UPLOAD_MB * 1024 * 1024) {
+    // The upload limit applies after compression, which can only be known
+    // once the file is packed; this is the limit on the PDF itself.
+    if (f && f.size > MAX_PDF_MB * 1024 * 1024) {
       setFile(null);
-      setFileError(`${f.name} is larger than ${MAX_UPLOAD_MB} MB.`);
+      setFileError(`${f.name} is larger than ${MAX_PDF_MB} MB.`);
       return;
     }
     setFileError(null);
@@ -275,7 +275,9 @@ export function UploadForm({
                   <span className="font-medium text-accent">Choose a PDF</span>{" "}
                   <span className="text-ink-2">or drag it here</span>
                 </p>
-                <p className="text-xs text-muted mt-1 mb-0">Up to {MAX_UPLOAD_MB} MB</p>
+                <p className="text-xs text-muted mt-1 mb-0">
+                  Up to {MAX_UPLOAD_MB} MB, or {MAX_PDF_MB} MB for scans that compress well
+                </p>
               </div>
             )}
           </div>
